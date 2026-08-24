@@ -57,6 +57,6 @@ python -m pip install -r requirements-build.txt
 python -m PyInstaller --noconfirm --clean --onefile --noconsole --name ArcadeGameManager main.py
 ```
 
-생성된 `dist/ArcadeGameManager.exe`를 `.arcade-game-manager-root`와 같은 폴더에 놓으면 해당 위치를 portable 루트로 사용합니다.
+생성된 `dist/ArcadeGameManager.exe`는 실행 파일이 놓인 폴더를 portable 루트로 사용합니다. 상위 폴더에 `.arcade-game-manager-root`가 있으면 해당 표식 위치를 우선 사용합니다.
 
 > 이 저장소에는 게임 데이터나 spice2x 바이너리를 포함하지 않습니다. 실제 배포 폴더에서는 런타임과 정당하게 보유한 게임 데이터를 상대경로로 배치합니다.

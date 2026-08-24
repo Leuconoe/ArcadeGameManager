@@ -24,6 +24,8 @@ class PortablePaths:
         for candidate in (current, *current.parents):
             if any((candidate / marker).is_file() for marker in markers):
                 return cls(candidate)
+        if frozen_executable is not None and start is None:
+            return cls(frozen_executable.parent)
         raise PortablePathError("Arcade Game Manager portable 루트 표시 파일을 찾지 못했습니다.")
 
     def resolve(self, relative: str, *, base: Path | None = None) -> Path:

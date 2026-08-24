@@ -1,6 +1,8 @@
 import tempfile
+import sys
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from bsm.paths import PortablePathError, PortablePaths
 
@@ -31,6 +33,21 @@ class PortablePathsTests(unittest.TestCase):
             child = root / "src" / "deep"
             child.mkdir(parents=True)
             self.assertEqual(PortablePaths.discover(child).root, root.resolve())
+
+    def test_frozen_executable_uses_its_folder_without_marker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            executable = root / "ArcadeGameManager.exe"
+            executable.write_bytes(b"")
+            with patch.object(sys, "frozen", True, create=True), patch.object(sys, "executable", str(executable)):
+                discovered = PortablePaths.discover()
+
+            self.assertEqual(discovered.root, root.resolve())
+
+    def test_source_mode_still_requires_marker(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            with self.assertRaises(PortablePathError):
+                PortablePaths.discover(Path(temporary))
 
 
 if __name__ == "__main__":
