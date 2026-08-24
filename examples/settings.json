@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "runtime": {
+    "directory": "spice2x",
+    "x86Executable": "spice.exe",
+    "x64Executable": "spice64.exe",
+    "configurator": "spicecfg.exe"
+  },
+  "defaultConfigProfile": "shared",
+  "configProfiles": {
+    "shared": {
+      "path": "spice2x/spicetools.xml"
+    }
+  }
+}
