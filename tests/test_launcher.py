@@ -5,6 +5,7 @@ from pathlib import Path
 from bsm.launcher import DirectLauncher, GameLauncher, SpiceLauncher
 from bsm.models import GameDefinition
 from bsm.paths import PortablePaths
+from bsm.settings import RuntimeSettings
 
 
 class SpiceLauncherTests(unittest.TestCase):
@@ -29,7 +30,10 @@ class SpiceLauncherTests(unittest.TestCase):
                 arguments=["-w"],
             )
 
-            plan = SpiceLauncher(PortablePaths(root)).plan(game)
+            plan = SpiceLauncher(
+                PortablePaths(root),
+                RuntimeSettings(spice_config_path="spice2x/spicetools.xml"),
+            ).plan(game)
 
             self.assertEqual(Path(plan.executable), runtime / "spice64.exe")
             self.assertEqual(Path(plan.working_directory), modules.parent)
@@ -50,11 +54,51 @@ class SpiceLauncherTests(unittest.TestCase):
             (runtime / "spicetools.xml").write_text("<config />", encoding="utf-8")
             game = GameDefinition("sdvx", "SDVX", "", "sdvx", "games/sdvx", ".", "x64")
 
-            plan = SpiceLauncher(PortablePaths(root)).plan(game, configure=True)
+            plan = SpiceLauncher(
+                PortablePaths(root),
+                RuntimeSettings(spice_config_path="spice2x/spicetools.xml"),
+            ).plan(game, configure=True)
 
             self.assertEqual(Path(plan.executable), runtime / "spicecfg.exe")
             self.assertEqual(plan.arguments[0], "-modules")
             self.assertEqual(Path(plan.arguments[1]), game_root)
+
+    def test_omits_optional_paths_when_left_blank(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "spice2x"
+            game_root = root / "games" / "popn"
+            runtime.mkdir(parents=True)
+            game_root.mkdir(parents=True)
+            (runtime / "spice64.exe").write_bytes(b"")
+            game = GameDefinition("popn", "pop'n music", "", "popn", "games/popn", "", "x64")
+
+            plan = SpiceLauncher(PortablePaths(root), RuntimeSettings()).plan(game)
+
+            self.assertEqual(plan.arguments, ())
+
+    def test_uses_custom_executable_and_config_paths(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game_root = root / "games" / "custom"
+            executable = root / "runtime" / "custom-spice.exe"
+            config = root / "profiles" / "cabinet.xml"
+            game_root.mkdir(parents=True)
+            executable.parent.mkdir(parents=True)
+            config.parent.mkdir(parents=True)
+            executable.write_bytes(b"")
+            config.write_text("<config />", encoding="utf-8")
+            game = GameDefinition("custom", "Custom", "", "other", "games/custom", "", "x64")
+            settings = RuntimeSettings(
+                spice_x64_executable="runtime/custom-spice.exe",
+                spice_config_path="profiles/cabinet.xml",
+            )
+
+            plan = SpiceLauncher(PortablePaths(root), settings).plan(game)
+
+            self.assertEqual(Path(plan.executable), executable)
+            self.assertEqual(plan.arguments[0], "-cfgpath")
+            self.assertEqual(Path(plan.arguments[1]), config)
 
 
 class ExtensibleLauncherTests(unittest.TestCase):

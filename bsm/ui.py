@@ -8,12 +8,13 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
 from .bat_converter import BatConverter
-from .catalog import SIGNATURE_BY_ID, catalog_titles
+from .catalog import catalog_titles
 from .detector import GameDetector
 from .launcher import GameLauncher
 from .models import DetectionCandidate, GameDefinition
 from .paths import PortablePaths
 from .store import GameStore
+from .settings import RuntimeSettings, RuntimeSettingsStore
 from .thumbnail import load_executable_icon, load_thumbnail
 
 
@@ -39,7 +40,13 @@ class ManagerApp(tk.Tk):
         self.paths = paths
         self.store = GameStore(paths)
         self.detector = GameDetector(paths)
-        self.launcher = GameLauncher(paths)
+        self.runtime_settings_store = RuntimeSettingsStore(paths)
+        try:
+            runtime_settings = self.runtime_settings_store.load()
+        except ValueError:
+            logging.getLogger(__name__).warning("Could not load runtime settings", exc_info=True)
+            runtime_settings = RuntimeSettings()
+        self.launcher = GameLauncher(paths, runtime_settings)
         self.bat_converter = BatConverter(paths.root)
         self.games: dict[str, GameDefinition] = {}
         self.validation_errors: dict[str, str] = {}
@@ -124,10 +131,7 @@ class ManagerApp(tk.Tk):
         ttk.Label(brand, text="ARCADE GAME MANAGER", style="Title.TLabel").pack(anchor=tk.W)
         ttk.Label(brand, text="One library. Multiple runtimes. Fully portable.", style="Subtitle.TLabel").pack(anchor=tk.W, pady=(1, 0))
 
-        runtime_ready = all(
-            (self.paths.root / "spice2x" / name).is_file()
-            for name in ("spice.exe", "spice64.exe", "spicecfg.exe", "spicetools.xml")
-        )
+        runtime_ready = self.launcher.spice_available()
         runtime_text = "●  SPICE2X READY" if runtime_ready else "●  SPICE2X OPTIONAL"
         runtime_style = "Success.TLabel" if runtime_ready else "Error.TLabel"
         self.runtime_label = ttk.Label(header, text=runtime_text, style=runtime_style)
@@ -139,7 +143,8 @@ class ManagerApp(tk.Tk):
         ttk.Button(toolbar, text="게임 실행", style="Launch.TButton", command=self.launch_game).pack(side=tk.LEFT, padx=(0, 7))
         ttk.Button(toolbar, text="편집", style="Ghost.TButton", command=self.edit_game).pack(side=tk.LEFT, padx=(0, 7))
         ttk.Button(toolbar, text="복제", style="Ghost.TButton", command=self.duplicate_game).pack(side=tk.LEFT, padx=(0, 7))
-        ttk.Button(toolbar, text="런타임 설정", style="Ghost.TButton", command=self.configure_game).pack(side=tk.LEFT, padx=(0, 7))
+        ttk.Button(toolbar, text="Spice 설정 실행", style="Ghost.TButton", command=self.configure_game).pack(side=tk.LEFT, padx=(0, 7))
+        ttk.Button(toolbar, text="Spice2x 경로", style="Ghost.TButton", command=self.edit_runtime_paths).pack(side=tk.LEFT, padx=(0, 7))
         ttk.Button(toolbar, text="Spice BAT 변환", style="Ghost.TButton", command=self.convert_bat).pack(side=tk.LEFT, padx=(0, 7))
         ttk.Button(toolbar, text="삭제", style="Danger.TButton", command=self.delete_game).pack(side=tk.LEFT)
         ttk.Button(toolbar, text="새로고침", style="Ghost.TButton", command=self.refresh).pack(side=tk.RIGHT)
@@ -228,6 +233,7 @@ class ManagerApp(tk.Tk):
     def refresh(self) -> None:
         selected = self.selected_game_id()
         try:
+            self.launcher.update_runtime_settings(self.runtime_settings_store.load())
             loaded = self.store.load_all()
         except ValueError as error:
             messagebox.showerror("설정 오류", str(error), parent=self)
@@ -266,6 +272,7 @@ class ManagerApp(tk.Tk):
         else:
             self._select_game("")
         self.game_count_var.set(f"{len(loaded)} GAME" + ("" if len(loaded) == 1 else "S"))
+        self._update_runtime_status()
         self._restore_library_status()
 
     def selected_game_id(self) -> str:
@@ -532,6 +539,32 @@ class ManagerApp(tk.Tk):
     def configure_game(self) -> None:
         self._run_selected(configure=True)
 
+    def edit_runtime_paths(self) -> None:
+        try:
+            settings = self.runtime_settings_store.load()
+        except ValueError as error:
+            messagebox.showerror("런타임 설정 오류", str(error), parent=self)
+            return
+        RuntimePathsDialog(self, self.paths, settings, self._save_runtime_settings)
+
+    def _save_runtime_settings(self, settings: RuntimeSettings) -> bool:
+        try:
+            self.runtime_settings_store.save(settings)
+        except (OSError, ValueError) as error:
+            messagebox.showerror("런타임 설정 저장 실패", str(error), parent=self)
+            return False
+        self.launcher.update_runtime_settings(settings)
+        self.refresh()
+        self.status_var.set("Spice2x 경로 설정을 저장했습니다.")
+        return True
+
+    def _update_runtime_status(self) -> None:
+        ready = self.launcher.spice_available()
+        self.runtime_label.configure(
+            text="●  SPICE2X READY" if ready else "●  SPICE2X OPTIONAL",
+            style="Success.TLabel" if ready else "Error.TLabel",
+        )
+
     def _run_selected(self, *, configure: bool) -> None:
         game = self.selected_game()
         if not game:
@@ -572,6 +605,97 @@ class ManagerApp(tk.Tk):
             return
         messagebox.showinfo("BAT 변환 완료", f"spice 경로를 상대경로로 변경했습니다.\n백업: {backup}", parent=self)
         self.status_var.set(f"BAT 변환 완료: {conversion.path}")
+
+
+class RuntimePathsDialog(tk.Toplevel):
+    def __init__(self, parent: ManagerApp, paths: PortablePaths, settings: RuntimeSettings, on_save):
+        super().__init__(parent)
+        self.paths = paths
+        self.on_save = on_save
+        self.title("Spice2x 경로 설정")
+        self.geometry("760x450")
+        self.minsize(660, 420)
+        self.configure(background=COLORS["background"])
+        self.transient(parent)
+        self.grab_set()
+
+        self.x86_var = tk.StringVar(value=settings.spice_x86_executable)
+        self.x64_var = tk.StringVar(value=settings.spice_x64_executable)
+        self.configurator_var = tk.StringVar(value=settings.spice_configurator)
+        self.config_var = tk.StringVar(value=settings.spice_config_path)
+        self._build()
+
+    def _build(self) -> None:
+        form = ttk.Frame(self, style="App.TFrame", padding=20)
+        form.pack(fill=tk.BOTH, expand=True)
+        form.columnconfigure(1, weight=1)
+
+        ttk.Label(form, text="Spice2x 경로 설정", font=("Segoe UI Semibold", 18)).grid(
+            row=0, column=0, columnspan=3, sticky=tk.W
+        )
+        ttk.Label(
+            form,
+            text="모든 값은 portable root 기준 상대경로로 저장됩니다. 빈 실행 파일은 표준 위치와 PATH에서 자동 탐색합니다.",
+            foreground=COLORS["muted"],
+            wraplength=690,
+        ).grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(3, 16))
+
+        fields = (
+            ("x86 실행 파일", self.x86_var, "executable"),
+            ("x64 실행 파일", self.x64_var, "executable"),
+            ("Configurator", self.configurator_var, "executable"),
+            ("설정 파일", self.config_var, "config"),
+        )
+        for row, (label, variable, kind) in enumerate(fields, start=2):
+            ttk.Label(form, text=label).grid(row=row, column=0, sticky=tk.W, pady=7)
+            ttk.Entry(form, textvariable=variable).grid(row=row, column=1, sticky=tk.EW, padx=9)
+            ttk.Button(
+                form,
+                text="찾기",
+                command=lambda target=variable, file_kind=kind: self._browse(target, file_kind),
+            ).grid(row=row, column=2)
+
+        ttk.Label(
+            form,
+            text="설정 파일을 비워 두면 -cfgpath를 전달하지 않습니다. 게임의 모듈 폴더를 비우면 -modules도 전달하지 않습니다.",
+            foreground=COLORS["muted"],
+            wraplength=690,
+        ).grid(row=6, column=0, columnspan=3, sticky=tk.W, pady=(16, 8))
+
+        buttons = ttk.Frame(form, style="App.TFrame")
+        buttons.grid(row=7, column=0, columnspan=3, sticky=tk.E, pady=(16, 0))
+        ttk.Button(buttons, text="모두 자동", style="Ghost.TButton", command=self._clear).pack(side=tk.LEFT, padx=(0, 8))
+        ttk.Button(buttons, text="취소", style="Ghost.TButton", command=self.destroy).pack(side=tk.RIGHT, padx=(7, 0))
+        ttk.Button(buttons, text="저장", style="Primary.TButton", command=self._save).pack(side=tk.RIGHT)
+
+    def _browse(self, variable: tk.StringVar, kind: str) -> None:
+        filetypes = (
+            [("Windows executable", "*.exe"), ("All files", "*.*")]
+            if kind == "executable"
+            else [("XML config", "*.xml"), ("All files", "*.*")]
+        )
+        selected = filedialog.askopenfilename(
+            parent=self,
+            title="Spice2x 파일 선택",
+            initialdir=str(self.paths.root),
+            filetypes=filetypes,
+        )
+        if selected:
+            variable.set(self.paths.relative(Path(selected)))
+
+    def _clear(self) -> None:
+        for variable in (self.x86_var, self.x64_var, self.configurator_var, self.config_var):
+            variable.set("")
+
+    def _save(self) -> None:
+        settings = RuntimeSettings(
+            spice_x86_executable=self.x86_var.get().strip(),
+            spice_x64_executable=self.x64_var.get().strip(),
+            spice_configurator=self.configurator_var.get().strip(),
+            spice_config_path=self.config_var.get().strip(),
+        )
+        if self.on_save(settings):
+            self.destroy()
 
 
 class GameDialog(tk.Toplevel):
@@ -873,7 +997,7 @@ class GameDialog(tk.Toplevel):
                 version=version,
                 game_type=game_type,
                 game_root=self.paths.relative(folder),
-                module_directory=self.module_var.get().strip() or ".",
+                module_directory=self.module_var.get().strip(),
                 architecture=self.arch_var.get(),
                 thumbnail=self.thumbnail_var.get().strip(),
                 arguments=arguments,

@@ -54,7 +54,8 @@ class GameStore:
         if not game.title.strip():
             raise ValueError("게임명을 입력하세요.")
         self.paths.ensure_relative(game.game_root)
-        self.paths.ensure_relative(game.module_directory)
+        if game.module_directory:
+            self.paths.ensure_relative(game.module_directory)
         self.paths.ensure_relative(game.working_directory)
         if game.launcher_type not in {"spice2x", "direct"}:
             raise ValueError("지원하지 않는 실행 방식입니다.")

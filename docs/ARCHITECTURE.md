@@ -47,15 +47,15 @@ ArcadeGameManager/
 
 ## 중앙 런타임 실행 규칙
 
-spice2x 소스는 시작할 때 실행 파일의 부모 폴더를 기본 `MODULE_PATH`로 사용합니다. 그러나 `-modules` 인자를 전달하면 해당 경로를 절대경로로 변환하고 DLL 검색 경로도 그쪽으로 변경합니다. 따라서 중앙 런타임에서는 `-modules`를 생략하면 안 됩니다.
+spice2x 소스는 시작할 때 실행 파일의 부모 폴더를 기본 `MODULE_PATH`로 사용합니다. `moduleDirectory`를 지정하면 `-modules`에 절대경로를 전달하고, 비워 두면 인자를 생략해 spice2x 기본 탐색을 사용합니다.
 
 모든 실행은 다음 규칙을 따릅니다.
 
 ```text
 Executable       = <runtime>\spice.exe 또는 spice64.exe
 WorkingDirectory = <gameRoot>
-Arguments        = -modules <moduleDirectory>
-                   -cfgpath <configProfilePath>
+Arguments        = [-modules <moduleDirectory>]
+                   [-cfgpath <configPath>]
                    <게임 공통 인자>
                    <선택한 실행 프로필 인자>
 ```
@@ -64,7 +64,7 @@ Arguments        = -modules <moduleDirectory>
 - `moduleDirectory`는 게임에 따라 게임 루트 또는 `<gameRoot>\modules`일 수 있으므로 manifest에서 지정합니다.
 - 설정 파일에는 절대경로를 저장하지 않습니다. `moduleDirectory`, `cfgpath` 및 다른 경로는 실행 직전에만 메모리에서 현재 위치에 맞는 절대경로로 해석합니다. 생성된 절대경로는 설정에 다시 기록하지 않습니다.
 - 문자열 하나로 명령행을 합치지 말고 .NET `ProcessStartInfo.ArgumentList`에 인자를 하나씩 넣습니다. 공백과 따옴표가 들어간 경로가 안전해집니다.
-- Configurator도 중앙 `spicecfg.exe`에 동일한 `WorkingDirectory`, `-modules`, `-cfgpath`를 전달합니다. 그냥 `spicecfg.exe`를 더블클릭하면 기본 AppData 설정을 열 수 있으므로 GUI의 "설정" 버튼만 사용하도록 합니다.
+- Configurator도 선택된 `spicecfg.exe`에 지정된 `-modules`, `-cfgpath`를 전달합니다. 비어 있는 선택 인자는 전달하지 않습니다.
 
 ## 상대경로 규칙
 
@@ -74,8 +74,8 @@ portable 기준점(`portableRoot`)은 프로세스의 현재 작업 폴더가 �
 
 | 필드 | 저장 기준 | 예시 |
 |---|---|---|
-| `runtime.directory` | `portableRoot` | `spice2x` |
-| config profile의 `path` | `portableRoot` | `spice2x/spicetools.xml` |
+| `spice2x.*Executable` | `portableRoot` | `spice2x/spice64.exe` 또는 빈 값 |
+| `spice2x.configPath` | `portableRoot` | `spice2x/spicetools.xml` 또는 빈 값 |
 | `gameRoot` | `portableRoot` | `games/iidx-32/contents` |
 | `thumbnail` | `portableRoot` | `data/thumbnails/iidx-32.webp` |
 | `moduleDirectory` | 해당 `gameRoot` | `modules` 또는 `.` |
@@ -87,8 +87,8 @@ portable 기준점(`portableRoot`)은 프로세스의 현재 작업 폴더가 �
 portableRoot = FindParentContaining(AppContext.BaseDirectory, ".arcade-game-manager-root")
 gameRoot     = FullPath(portableRoot + manifest.gameRoot)
 modulePath   = FullPath(gameRoot + manifest.moduleDirectory)
-runtimePath  = FullPath(portableRoot + settings.runtime.directory)
-configPath   = FullPath(portableRoot + selectedConfigProfile.path)
+runtimePath  = FullPath(portableRoot + settings.spice2x.*Executable)
+configPath   = FullPath(portableRoot + settings.spice2x.configPath)
 thumbnail    = FullPath(portableRoot + manifest.thumbnail)
 ```
 
@@ -143,27 +143,21 @@ IIDX_32_Pinky_Crush
 
 ### 전역 설정
 
-`settings.json`에는 활성 spice2x 런타임과 설정 프로필을 둡니다.
+`settings.json`에는 선택적으로 spice2x 관련 파일 경로를 둡니다. 실행 파일 경로가 비어 있으면 표준 위치와 PATH에서 찾고, 설정 파일이 비어 있으면 `-cfgpath`를 생략합니다.
 
 ```json
 {
-  "schemaVersion": 1,
-  "runtime": {
-    "directory": "spice2x",
-    "x86Executable": "spice.exe",
-    "x64Executable": "spice64.exe",
-    "configurator": "spicecfg.exe"
-  },
-  "defaultConfigProfile": "shared",
-  "configProfiles": {
-    "shared": {
-      "path": "spice2x/spicetools.xml"
-    }
+  "schemaVersion": 2,
+  "spice2x": {
+    "x86Executable": "spice2x/spice.exe",
+    "x64Executable": "spice2x/spice64.exe",
+    "configurator": "spice2x/spicecfg.exe",
+    "configPath": "spice2x/spicetools.xml"
   }
 }
 ```
 
-처음에는 `shared` 하나만 사용하면 됩니다. 나중에 입력 장치가 다른 환경을 지원해야 할 때 `keyboard`, `cabinet` 같은 프로필을 추가할 수 있습니다.
+모든 값은 portable root 기준 상대경로이며 빈 값도 유효합니다.
 
 ### 게임 manifest
 
@@ -186,7 +180,7 @@ IIDX_32_Pinky_Crush
 }
 ```
 
-`arguments`는 게임에 필요한 사용자 인자입니다. GUI에서는 한 줄에 인자 하나씩 입력합니다. `-modules`와 `-cfgpath`는 사용자가 중복 입력하지 않도록 실행 코어가 자동으로 추가합니다.
+`arguments`는 게임에 필요한 사용자 인자입니다. GUI에서는 한 줄에 인자 하나씩 입력합니다. `-modules`와 `-cfgpath`는 해당 경로가 지정된 경우에만 실행 코어가 자동으로 추가합니다.
 
 환경 변수나 사전 실행 작업이 필요한 게임이 확인되면 다음과 같이 구조화된 필드로 확장합니다. 임의의 shell 문자열을 그대로 실행하는 방식은 경로 quoting과 보안 문제가 있어 피하는 것이 좋습니다.
 
