@@ -15,6 +15,7 @@ from .models import DetectionCandidate, GameDefinition
 from .paths import PortablePaths
 from .store import GameStore
 from .settings import RuntimeSettings, RuntimeSettingsStore
+from .sorting import SORT_MODES, sort_library_items
 from .thumbnail import load_executable_icon, load_thumbnail
 
 
@@ -31,6 +32,13 @@ COLORS = {
     "success": "#20A464",
     "success_hover": "#198953",
     "danger": "#D92D50",
+}
+
+SORT_LABELS = {
+    "name_asc": "이름 A→Z",
+    "name_desc": "이름 Z→A",
+    "recent_desc": "최신 · 새 항목 먼저",
+    "recent_asc": "최신 · 오래된 항목 먼저",
 }
 
 
@@ -60,7 +68,9 @@ class ManagerApp(tk.Tk):
         self.selected_game_key = ""
         self.active_library = "games"
         self.running_processes: dict[str, subprocess.Popen] = {}
-        self.view_mode = self._load_view_mode()
+        ui_settings = self._load_ui_settings()
+        self.view_mode = ui_settings["viewMode"]
+        self.sort_mode = ui_settings["sortMode"]
         self._grid_columns = 0
         self._grid_resize_job: str | None = None
 
@@ -197,6 +207,16 @@ class ManagerApp(tk.Tk):
             list_header, text="썸네일", command=lambda: self._set_view_mode("thumbnail")
         )
         self.thumbnail_mode_button.pack(side=tk.RIGHT)
+        sort_menu = tk.Menu(self, tearoff=False)
+        for mode, label in SORT_LABELS.items():
+            sort_menu.add_command(label=label, command=lambda value=mode: self._set_sort_mode(value))
+        self.sort_button = ttk.Menubutton(
+            list_header,
+            text=self._sort_button_text(),
+            style="Ghost.TButton",
+            menu=sort_menu,
+        )
+        self.sort_button.pack(side=tk.RIGHT, padx=(0, 6))
 
         columns = ("status", "title", "version", "type", "path")
         self.list_view = ttk.Frame(list_frame, style="Surface.TFrame")
@@ -321,8 +341,10 @@ class ManagerApp(tk.Tk):
 
     def _visible_games(self) -> list[GameDefinition]:
         if self.active_library == "games":
-            return [game for game in self.games.values() if game.item_kind == "game"]
-        return [game for game in self.games.values() if game.item_kind in {"server", "tool"}]
+            visible = [game for game in self.games.values() if game.item_kind == "game"]
+        else:
+            visible = [game for game in self.games.values() if game.item_kind in {"server", "tool"}]
+        return sort_library_items(visible, self.sort_mode, self.store.modified_time)
 
     @staticmethod
     def _item_type_title(game: GameDefinition, titles: dict[str, str]) -> str:
@@ -388,20 +410,32 @@ class ManagerApp(tk.Tk):
         image.put(COLORS["surface_alt"], to=(0, 0, 220, 132))
         return image
 
-    def _load_view_mode(self) -> str:
+    def _load_ui_settings(self) -> dict[str, str]:
         settings_path = self.paths.root / "data" / "ui.json"
         try:
-            value = json.loads(settings_path.read_text(encoding="utf-8")).get("viewMode")
-            return value if value in {"thumbnail", "list"} else "thumbnail"
+            values = json.loads(settings_path.read_text(encoding="utf-8"))
         except (OSError, ValueError, TypeError):
-            return "thumbnail"
+            values = {}
+        if not isinstance(values, dict):
+            values = {}
+        view_mode = values.get("viewMode")
+        sort_mode = values.get("sortMode")
+        return {
+            "viewMode": view_mode if view_mode in {"thumbnail", "list"} else "thumbnail",
+            "sortMode": sort_mode if sort_mode in SORT_MODES else "name_asc",
+        }
 
-    def _save_view_mode(self) -> None:
+    def _save_ui_settings(self) -> None:
         settings_path = self.paths.root / "data" / "ui.json"
         try:
             settings_path.parent.mkdir(parents=True, exist_ok=True)
             settings_path.write_text(
-                json.dumps({"viewMode": self.view_mode}, ensure_ascii=False, indent=2) + "\n",
+                json.dumps(
+                    {"viewMode": self.view_mode, "sortMode": self.sort_mode},
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n",
                 encoding="utf-8",
             )
         except OSError:
@@ -420,7 +454,18 @@ class ManagerApp(tk.Tk):
         self.thumbnail_mode_button.configure(style="Primary.TButton" if mode == "thumbnail" else "Ghost.TButton")
         self.list_mode_button.configure(style="Primary.TButton" if mode == "list" else "Ghost.TButton")
         if persist:
-            self._save_view_mode()
+            self._save_ui_settings()
+
+    def _sort_button_text(self) -> str:
+        return f"정렬 · {SORT_LABELS.get(self.sort_mode, SORT_LABELS['name_asc'])}"
+
+    def _set_sort_mode(self, mode: str) -> None:
+        if mode not in SORT_MODES or mode == self.sort_mode:
+            return
+        self.sort_mode = mode
+        self.sort_button.configure(text=self._sort_button_text())
+        self._save_ui_settings()
+        self.refresh()
 
     def _on_tree_selection(self, _event=None) -> None:
         selection = self.tree.selection()

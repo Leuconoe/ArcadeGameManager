@@ -112,6 +112,8 @@ thumbnail    = FullPath(portableRoot + manifest.thumbnail)
 
 게임이 아닌 실행 항목은 `itemKind`를 `server` 또는 `tool`로 저장하고 `도구 · 서버` 탭에서 분리해 표시합니다. 이 항목은 `direct` launcher만 사용하며 EXE, BAT, CMD를 지원합니다. `../_tools/asphyxia-core-win-x64`처럼 portable root 바깥의 형제 폴더도 상대경로로 저장할 수 있습니다. 관리자가 시작한 프로세스 핸들은 현재 세션 동안 유지해 실행 상태와 중지 기능에 사용합니다.
 
+라이브러리 헤더의 단일 정렬 메뉴는 이름 오름차순·내림차순과 최신 오름차순·내림차순을 제공합니다. 최신순은 `data/games/*.json`의 마지막 수정 시각을 기준으로 하며 게임과 도구·서버 탭, 리스트와 썸네일 보기에 동일하게 적용됩니다. 선택한 `sortMode`는 보기 방식과 함께 `data/ui.json`에 저장합니다.
+
 ### 게임 계열을 먼저 지정
 
 1. 사용자가 IIDX, SDVX, DDR 같은 게임 계열을 선택합니다.

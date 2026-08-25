@@ -38,6 +38,12 @@ class GameStore:
         if target.exists():
             target.unlink()
 
+    def modified_time(self, game_id: str) -> int:
+        try:
+            return (self.games_directory / f"{game_id}.json").stat().st_mtime_ns
+        except OSError:
+            return 0
+
     def make_unique_id(self, title: str, version: str, current_id: str = "") -> str:
         base = re.sub(r"[^a-z0-9]+", "-", f"{title}-{version}".lower()).strip("-") or "game"
         existing = {item.id for item in self.load_all() if item.id != current_id}
