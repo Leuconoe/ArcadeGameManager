@@ -542,10 +542,10 @@ class ManagerApp(tk.Tk):
         for row_start in range(0, len(games), columns):
             row_frame = tk.Frame(self.thumbnail_grid, background=COLORS["surface"])
             row_frame.pack(fill=tk.X)
-            centered_row = tk.Frame(row_frame, background=COLORS["surface"])
-            centered_row.pack(anchor=tk.CENTER)
+            aligned_row = tk.Frame(row_frame, background=COLORS["surface"])
+            aligned_row.pack(anchor=tk.W)
             for game in games[row_start : row_start + columns]:
-                self._build_thumbnail_card(centered_row, game, titles)
+                self._build_thumbnail_card(aligned_row, game, titles)
         self._select_game(self.selected_game_key)
 
     def _build_thumbnail_card(self, parent: tk.Frame, game: GameDefinition, titles: dict[str, str]) -> None:
