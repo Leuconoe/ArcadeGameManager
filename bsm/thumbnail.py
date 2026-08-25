@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import ctypes
+import hashlib
+import os
 import sys
+import tempfile
 from collections import defaultdict
 from pathlib import Path
 
@@ -67,12 +70,60 @@ def load_executable_icon(
     path: Path,
     max_size: tuple[int, int] = (96, 96),
     canvas_size: tuple[int, int] | None = None,
+    cache_directory: Path | None = None,
 ) -> ImageTk.PhotoImage:
-    """Extract the primary Windows icon from an EXE without extra dependencies."""
+    """Load the highest-resolution primary EXE icon and cache its transparent PNG."""
+    image = load_executable_icon_image(path, cache_directory)
+    return ImageTk.PhotoImage(artwork_with_blurred_background(image, canvas_size or max_size))
+
+
+def load_executable_icon_image(path: Path, cache_directory: Path | None = None) -> Image.Image:
     if sys.platform != "win32":
         raise OSError("실행 파일 아이콘 추출은 Windows에서만 지원합니다.")
     if not path.is_file():
         raise FileNotFoundError(f"실행 파일을 찾을 수 없습니다: {path}")
+
+    cache_path = executable_icon_cache_path(path, cache_directory) if cache_directory else None
+    if cache_path and cache_path.is_file():
+        try:
+            with Image.open(cache_path) as cached:
+                return cached.convert("RGBA")
+        except (OSError, ValueError):
+            pass
+
+    image = _extract_windows_executable_icon(path)
+    if cache_path:
+        _save_cached_icon(image, cache_path)
+    return image
+
+
+def executable_icon_cache_path(path: Path, cache_directory: Path | None) -> Path:
+    if cache_directory is None:
+        raise ValueError("아이콘 캐시 폴더가 필요합니다.")
+    resolved = path.resolve()
+    stat = resolved.stat()
+    identity = hashlib.sha256(str(resolved).casefold().encode("utf-8")).hexdigest()[:16]
+    revision = hashlib.sha256(f"{stat.st_size}:{stat.st_mtime_ns}".encode("ascii")).hexdigest()[:12]
+    return cache_directory / f"{identity}-{revision}.png"
+
+
+def _save_cached_icon(image: Image.Image, target: Path) -> None:
+    target.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary_name = tempfile.mkstemp(prefix=f".{target.stem}.", suffix=".tmp", dir=target.parent)
+    os.close(handle)
+    try:
+        image.save(temporary_name, format="PNG", optimize=True)
+        os.replace(temporary_name, target)
+    except Exception:
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
+
+
+def _extract_windows_executable_icon(path: Path) -> Image.Image:
+    """Ask Windows for the best match to a 256px icon from the primary icon group."""
 
     from ctypes import wintypes
 
@@ -94,17 +145,19 @@ def load_executable_icon(
     class BITMAPINFO(ctypes.Structure):
         _fields_ = [("bmiHeader", BITMAPINFOHEADER), ("bmiColors", wintypes.DWORD * 3)]
 
-    shell32 = ctypes.windll.shell32
     user32 = ctypes.windll.user32
     gdi32 = ctypes.windll.gdi32
-    shell32.ExtractIconExW.argtypes = [
+    user32.PrivateExtractIconsW.argtypes = [
         wintypes.LPCWSTR,
         ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
         ctypes.POINTER(wintypes.HANDLE),
-        ctypes.POINTER(wintypes.HANDLE),
+        ctypes.POINTER(wintypes.UINT),
+        wintypes.UINT,
         wintypes.UINT,
     ]
-    shell32.ExtractIconExW.restype = wintypes.UINT
+    user32.PrivateExtractIconsW.restype = wintypes.UINT
     user32.GetDC.argtypes = [wintypes.HWND]
     user32.GetDC.restype = wintypes.HDC
     user32.ReleaseDC.argtypes = [wintypes.HWND, wintypes.HDC]
@@ -136,14 +189,22 @@ def load_executable_icon(
     gdi32.SelectObject.restype = wintypes.HANDLE
     gdi32.DeleteObject.argtypes = [wintypes.HANDLE]
     gdi32.DeleteDC.argtypes = [wintypes.HDC]
-    large_icon = wintypes.HANDLE()
-    small_icon = wintypes.HANDLE()
-    extracted = shell32.ExtractIconExW(str(path), 0, ctypes.byref(large_icon), ctypes.byref(small_icon), 1)
-    icon = large_icon.value or small_icon.value
-    if extracted == 0 or not icon:
+    width = height = 256
+    icon_handle = wintypes.HANDLE()
+    icon_resource_id = wintypes.UINT()
+    extracted = user32.PrivateExtractIconsW(
+        str(path),
+        0,
+        width,
+        height,
+        ctypes.byref(icon_handle),
+        ctypes.byref(icon_resource_id),
+        1,
+        0,
+    )
+    if extracted in {0, 0xFFFFFFFF} or not icon_handle.value:
         raise ValueError(f"실행 파일에서 아이콘을 찾지 못했습니다: {path.name}")
 
-    width = height = 256
     screen_dc = user32.GetDC(None)
     memory_dc = gdi32.CreateCompatibleDC(screen_dc)
     bits = ctypes.c_void_p()
@@ -158,9 +219,7 @@ def load_executable_icon(
     if not bitmap:
         user32.ReleaseDC(None, screen_dc)
         gdi32.DeleteDC(memory_dc)
-        user32.DestroyIcon(large_icon)
-        if small_icon.value:
-            user32.DestroyIcon(small_icon)
+        user32.DestroyIcon(icon_handle)
         raise OSError("실행 파일 아이콘용 비트맵을 만들지 못했습니다.")
 
     previous = gdi32.SelectObject(memory_dc, bitmap)
@@ -168,7 +227,7 @@ def load_executable_icon(
         blue, green, red = COLORS_FALLBACK[2], COLORS_FALLBACK[1], COLORS_FALLBACK[0]
         background_bytes = bytes((blue, green, red, 255)) * (width * height)
         ctypes.memmove(bits, background_bytes, len(background_bytes))
-        if not user32.DrawIconEx(memory_dc, 0, 0, icon, width, height, 0, None, 0x0003):
+        if not user32.DrawIconEx(memory_dc, 0, 0, icon_handle, width, height, 0, None, 0x0003):
             raise OSError(f"실행 파일 아이콘을 그리지 못했습니다: {path.name}")
         raw = ctypes.string_at(bits, width * height * 4)
         rendered = Image.frombytes("RGBA", (width, height), raw, "raw", "BGRA").convert("RGB")
@@ -180,17 +239,14 @@ def load_executable_icon(
         bounds = alpha.getbbox()
         if bounds:
             image = image.crop(bounds)
-        target_size = canvas_size or max_size
-        return ImageTk.PhotoImage(artwork_with_blurred_background(image, target_size))
+        return image
     finally:
         gdi32.SelectObject(memory_dc, previous)
         gdi32.DeleteObject(bitmap)
         gdi32.DeleteDC(memory_dc)
         user32.ReleaseDC(None, screen_dc)
-        if large_icon.value:
-            user32.DestroyIcon(large_icon)
-        if small_icon.value:
-            user32.DestroyIcon(small_icon)
+        if icon_handle.value:
+            user32.DestroyIcon(icon_handle)
 
 
 COLORS_FALLBACK = (240, 243, 248)

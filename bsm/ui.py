@@ -171,9 +171,6 @@ class ManagerApp(tk.Tk):
         toolbar.pack(fill=tk.X, pady=(0, 10))
         ttk.Button(toolbar, text="+  게임 추가", style="Primary.TButton", command=self.add_game).pack(side=tk.LEFT, padx=(0, 7))
         ttk.Button(toolbar, text="+  도구/서버", style="Ghost.TButton", command=self.add_support_item).pack(side=tk.LEFT, padx=(0, 7))
-        ttk.Button(toolbar, text="실행", style="Launch.TButton", command=self.launch_game).pack(side=tk.LEFT, padx=(0, 7))
-        self.stop_button = ttk.Button(toolbar, text="중지", style="Ghost.TButton", command=self.stop_selected)
-        self.stop_button.pack(side=tk.LEFT, padx=(0, 7))
         ttk.Button(toolbar, text="편집", style="Ghost.TButton", command=self.edit_game).pack(side=tk.LEFT, padx=(0, 7))
         ttk.Button(toolbar, text="복제", style="Ghost.TButton", command=self.duplicate_game).pack(side=tk.LEFT, padx=(0, 7))
         self.configure_button = ttk.Button(toolbar, text="Spice 설정 실행", style="Ghost.TButton", command=self.configure_game)
@@ -373,7 +370,6 @@ class ManagerApp(tk.Tk):
         self.games_tab_button.configure(style="Primary.TButton" if games_active else "Ghost.TButton")
         self.support_tab_button.configure(style="Ghost.TButton" if games_active else "Primary.TButton")
         self.configure_button.configure(state=tk.NORMAL if games_active else tk.DISABLED)
-        self.stop_button.configure(state=tk.DISABLED if games_active else tk.NORMAL)
 
     def _library_thumbnail(self, game: GameDefinition) -> tk.PhotoImage:
         if game.thumbnail:
@@ -384,7 +380,12 @@ class ManagerApp(tk.Tk):
         if game.launcher_type == "direct" and game.executable:
             try:
                 executable = self.paths.resolve(game.executable, base=self.paths.resolve(game.game_root))
-                return load_executable_icon(executable, max_size=(68, 68), canvas_size=(96, 68))
+                return load_executable_icon(
+                    executable,
+                    max_size=(68, 68),
+                    canvas_size=(96, 68),
+                    cache_directory=self.paths.root / "data" / "cache" / "icons",
+                )
             except (tk.TclError, OSError, ValueError):
                 pass
         image = tk.PhotoImage(width=96, height=68)
@@ -403,7 +404,12 @@ class ManagerApp(tk.Tk):
         if game.launcher_type == "direct" and game.executable:
             try:
                 executable = self.paths.resolve(game.executable, base=self.paths.resolve(game.game_root))
-                return load_executable_icon(executable, max_size=(112, 112), canvas_size=(220, 132))
+                return load_executable_icon(
+                    executable,
+                    max_size=(112, 112),
+                    canvas_size=(220, 132),
+                    cache_directory=self.paths.root / "data" / "cache" / "icons",
+                )
             except (tk.TclError, OSError, ValueError):
                 pass
         image = tk.PhotoImage(width=220, height=132)
@@ -674,26 +680,6 @@ class ManagerApp(tk.Tk):
 
     def launch_game(self) -> None:
         self._run_selected(configure=False)
-
-    def stop_selected(self) -> None:
-        item = self.selected_game()
-        if not item:
-            messagebox.showinfo("중지", "중지할 도구나 서버를 선택하세요.", parent=self)
-            return
-        process = self.running_processes.get(item.id)
-        if process is None or process.poll() is not None:
-            self.running_processes.pop(item.id, None)
-            messagebox.showinfo("중지", "이 프로그램에서 실행한 프로세스가 현재 동작 중이지 않습니다.", parent=self)
-            self.refresh()
-            return
-        try:
-            process.terminate()
-        except OSError as error:
-            messagebox.showerror("중지 실패", str(error), parent=self)
-            return
-        self.running_processes.pop(item.id, None)
-        self.refresh()
-        self.status_var.set(f"중지 요청: {item.title}")
 
     def configure_game(self) -> None:
         self._run_selected(configure=True)
@@ -1026,6 +1012,7 @@ class SettingsDialog(tk.Toplevel):
             ("Portable 루트", self.paths.root),
             ("데이터 폴더", self.paths.root / "data"),
             ("게임·도구 목록", self.paths.root / "data" / "games"),
+            ("EXE 아이콘 캐시", self.paths.root / "data" / "cache" / "icons"),
             ("런타임 설정", self.paths.root / "data" / "settings.json"),
             ("화면 설정", self.paths.root / "data" / "ui.json"),
             ("로그", self.paths.root / "data" / "logs" / "manager.log"),
