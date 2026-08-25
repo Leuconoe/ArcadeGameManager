@@ -3,11 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import subprocess
+import sys
 import tkinter as tk
 from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 
-from .bat_converter import BatConverter
 from .catalog import catalog_titles
 from .detector import GameDetector
 from .launcher import GameLauncher
@@ -34,6 +34,11 @@ COLORS = {
 }
 
 
+def bundled_asset(name: str) -> Path:
+    base = Path(getattr(sys, "_MEIPASS", Path(__file__).resolve().parent.parent))
+    return base / "assets" / name
+
+
 class ManagerApp(tk.Tk):
     def __init__(self, paths: PortablePaths):
         super().__init__()
@@ -47,18 +52,21 @@ class ManagerApp(tk.Tk):
             logging.getLogger(__name__).warning("Could not load runtime settings", exc_info=True)
             runtime_settings = RuntimeSettings()
         self.launcher = GameLauncher(paths, runtime_settings)
-        self.bat_converter = BatConverter(paths.root)
         self.games: dict[str, GameDefinition] = {}
         self.validation_errors: dict[str, str] = {}
         self.library_images: dict[str, tk.PhotoImage] = {}
         self.grid_images: dict[str, tk.PhotoImage] = {}
         self.grid_cards: dict[str, tk.Frame] = {}
         self.selected_game_key = ""
+        self.active_library = "games"
+        self.running_processes: dict[str, subprocess.Popen] = {}
         self.view_mode = self._load_view_mode()
         self._grid_columns = 0
         self._grid_resize_job: str | None = None
 
         self.title("Arcade Game Manager")
+        self._app_icon = tk.PhotoImage(file=str(bundled_asset("app-icon-64.png")))
+        self.iconphoto(True, self._app_icon)
         self.geometry("1180x720")
         self.minsize(900, 560)
         self.configure(background=COLORS["background"])
@@ -117,6 +125,19 @@ class ManagerApp(tk.Tk):
         style.configure("Dark.TSeparator", background=COLORS["border"])
         style.configure("TEntry", fieldbackground=COLORS["surface_alt"], foreground=COLORS["text"], insertcolor=COLORS["text"], bordercolor=COLORS["border"], padding=7)
         style.configure("TCombobox", fieldbackground=COLORS["surface_alt"], foreground=COLORS["text"], arrowcolor=COLORS["muted"], bordercolor=COLORS["border"], padding=6)
+        style.configure("TNotebook", background=COLORS["background"], borderwidth=0)
+        style.configure(
+            "TNotebook.Tab",
+            background=COLORS["surface_alt"],
+            foreground=COLORS["text"],
+            padding=(16, 9),
+            borderwidth=0,
+        )
+        style.map(
+            "TNotebook.Tab",
+            background=[("selected", COLORS["surface"]), ("active", COLORS["surface_hover"])],
+            foreground=[("selected", COLORS["accent"])],
+        )
 
     def _build_ui(self) -> None:
         shell = ttk.Frame(self, style="App.TFrame", padding=(18, 16, 18, 10))
@@ -124,8 +145,7 @@ class ManagerApp(tk.Tk):
 
         header = ttk.Frame(shell, style="Surface.TFrame", padding=(20, 16))
         header.pack(fill=tk.X, pady=(0, 10))
-        badge = tk.Label(header, text="AG", bg=COLORS["accent"], fg="#FFFFFF", font=("Segoe UI Black", 14), width=3, height=2)
-        badge.pack(side=tk.LEFT, padx=(0, 13))
+        ttk.Label(header, image=self._app_icon, style="Surface.TLabel").pack(side=tk.LEFT, padx=(0, 13))
         brand = ttk.Frame(header, style="Surface.TFrame")
         brand.pack(side=tk.LEFT, fill=tk.Y)
         ttk.Label(brand, text="ARCADE GAME MANAGER", style="Title.TLabel").pack(anchor=tk.W)
@@ -140,12 +160,15 @@ class ManagerApp(tk.Tk):
         toolbar = ttk.Frame(shell, style="Surface.TFrame", padding=(14, 11))
         toolbar.pack(fill=tk.X, pady=(0, 10))
         ttk.Button(toolbar, text="+  게임 추가", style="Primary.TButton", command=self.add_game).pack(side=tk.LEFT, padx=(0, 7))
-        ttk.Button(toolbar, text="게임 실행", style="Launch.TButton", command=self.launch_game).pack(side=tk.LEFT, padx=(0, 7))
+        ttk.Button(toolbar, text="+  도구/서버", style="Ghost.TButton", command=self.add_support_item).pack(side=tk.LEFT, padx=(0, 7))
+        ttk.Button(toolbar, text="실행", style="Launch.TButton", command=self.launch_game).pack(side=tk.LEFT, padx=(0, 7))
+        self.stop_button = ttk.Button(toolbar, text="중지", style="Ghost.TButton", command=self.stop_selected)
+        self.stop_button.pack(side=tk.LEFT, padx=(0, 7))
         ttk.Button(toolbar, text="편집", style="Ghost.TButton", command=self.edit_game).pack(side=tk.LEFT, padx=(0, 7))
         ttk.Button(toolbar, text="복제", style="Ghost.TButton", command=self.duplicate_game).pack(side=tk.LEFT, padx=(0, 7))
-        ttk.Button(toolbar, text="Spice 설정 실행", style="Ghost.TButton", command=self.configure_game).pack(side=tk.LEFT, padx=(0, 7))
-        ttk.Button(toolbar, text="Spice2x 경로", style="Ghost.TButton", command=self.edit_runtime_paths).pack(side=tk.LEFT, padx=(0, 7))
-        ttk.Button(toolbar, text="Spice BAT 변환", style="Ghost.TButton", command=self.convert_bat).pack(side=tk.LEFT, padx=(0, 7))
+        self.configure_button = ttk.Button(toolbar, text="Spice 설정 실행", style="Ghost.TButton", command=self.configure_game)
+        self.configure_button.pack(side=tk.LEFT, padx=(0, 7))
+        ttk.Button(toolbar, text="설정", style="Ghost.TButton", command=self.edit_settings).pack(side=tk.LEFT, padx=(0, 7))
         ttk.Button(toolbar, text="삭제", style="Danger.TButton", command=self.delete_game).pack(side=tk.LEFT)
         ttk.Button(toolbar, text="새로고침", style="Ghost.TButton", command=self.refresh).pack(side=tk.RIGHT)
 
@@ -157,7 +180,13 @@ class ManagerApp(tk.Tk):
 
         list_header = ttk.Frame(list_frame, style="Surface.TFrame")
         list_header.pack(fill=tk.X, pady=(0, 10))
-        ttk.Label(list_header, text="GAME LIBRARY", style="Section.TLabel").pack(side=tk.LEFT)
+        ttk.Label(list_header, text="LIBRARY", style="Section.TLabel").pack(side=tk.LEFT)
+        self.games_tab_button = ttk.Button(list_header, text="게임", command=lambda: self._set_library_tab("games"))
+        self.games_tab_button.pack(side=tk.LEFT, padx=(14, 5))
+        self.support_tab_button = ttk.Button(
+            list_header, text="도구 · 서버", command=lambda: self._set_library_tab("support")
+        )
+        self.support_tab_button.pack(side=tk.LEFT)
         self.game_count_var = tk.StringVar(value="0 GAMES")
         ttk.Label(list_header, textvariable=self.game_count_var, style="Muted.TLabel").pack(side=tk.RIGHT)
         self.list_mode_button = ttk.Button(
@@ -222,6 +251,7 @@ class ManagerApp(tk.Tk):
         grid_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         self._set_view_mode(self.view_mode, persist=False)
+        self._update_library_controls()
 
         self.status_var = tk.StringVar(value=f"Portable root: {self.paths.root}")
         status = ttk.Frame(self, style="Surface.TFrame", padding=(18, 7))
@@ -239,11 +269,17 @@ class ManagerApp(tk.Tk):
             messagebox.showerror("설정 오류", str(error), parent=self)
             return
         self.games = {game.id: game for game in loaded}
+        self.running_processes = {
+            game_id: process
+            for game_id, process in self.running_processes.items()
+            if process.poll() is None and game_id in self.games
+        }
         self.validation_errors = {game.id: self.launcher.validation_error(game) for game in loaded}
         self.library_images.clear()
         self.tree.delete(*self.tree.get_children())
+        visible = self._visible_games()
         titles = catalog_titles()
-        for index, game in enumerate(loaded):
+        for index, game in enumerate(visible):
             thumbnail = self._library_thumbnail(game)
             self.library_images[game.id] = thumbnail
             self.tree.insert(
@@ -253,10 +289,10 @@ class ManagerApp(tk.Tk):
                 text="",
                 image=thumbnail,
                 values=(
-                    "● 실행 가능" if not self.validation_errors[game.id] else "● 확인 필요",
+                    self._item_status(game),
                     game.title,
                     game.version,
-                    titles.get(game.game_type, game.game_type),
+                    self._item_type_title(game, titles),
                     game.game_root,
                 ),
                 tags=("invalid" if self.validation_errors[game.id] else ("even" if index % 2 == 0 else "odd"),),
@@ -265,13 +301,15 @@ class ManagerApp(tk.Tk):
         self.tree.tag_configure("odd", background=COLORS["surface_alt"])
         self.tree.tag_configure("invalid", foreground=COLORS["danger"], background="#FFF4F6")
         self._render_thumbnail_grid(force=True)
-        if selected and selected in self.games:
+        visible_ids = {game.id for game in visible}
+        if selected and selected in visible_ids:
             self._select_game(selected)
-        elif loaded:
-            self._select_game(loaded[0].id)
+        elif visible:
+            self._select_game(visible[0].id)
         else:
             self._select_game("")
-        self.game_count_var.set(f"{len(loaded)} GAME" + ("" if len(loaded) == 1 else "S"))
+        unit = "GAME" if self.active_library == "games" else "ITEM"
+        self.game_count_var.set(f"{len(visible)} {unit}" + ("" if len(visible) == 1 else "S"))
         self._update_runtime_status()
         self._restore_library_status()
 
@@ -280,6 +318,40 @@ class ManagerApp(tk.Tk):
 
     def selected_game(self) -> GameDefinition | None:
         return self.games.get(self.selected_game_id())
+
+    def _visible_games(self) -> list[GameDefinition]:
+        if self.active_library == "games":
+            return [game for game in self.games.values() if game.item_kind == "game"]
+        return [game for game in self.games.values() if game.item_kind in {"server", "tool"}]
+
+    @staticmethod
+    def _item_type_title(game: GameDefinition, titles: dict[str, str]) -> str:
+        if game.item_kind == "server":
+            return "가상 서버"
+        if game.item_kind == "tool":
+            return "보조 도구"
+        return titles.get(game.game_type, game.game_type)
+
+    def _item_status(self, game: GameDefinition) -> str:
+        process = self.running_processes.get(game.id)
+        if process is not None and process.poll() is None:
+            return "● 실행 중"
+        return "● 실행 가능" if not self.validation_errors.get(game.id) else "● 확인 필요"
+
+    def _set_library_tab(self, tab: str) -> None:
+        if tab not in {"games", "support"} or tab == self.active_library:
+            return
+        self.active_library = tab
+        self.selected_game_key = ""
+        self._update_library_controls()
+        self.refresh()
+
+    def _update_library_controls(self) -> None:
+        games_active = self.active_library == "games"
+        self.games_tab_button.configure(style="Primary.TButton" if games_active else "Ghost.TButton")
+        self.support_tab_button.configure(style="Ghost.TButton" if games_active else "Primary.TButton")
+        self.configure_button.configure(state=tk.NORMAL if games_active else tk.DISABLED)
+        self.stop_button.configure(state=tk.DISABLED if games_active else tk.NORMAL)
 
     def _library_thumbnail(self, game: GameDefinition) -> tk.PhotoImage:
         if game.thumbnail:
@@ -367,9 +439,11 @@ class ManagerApp(tk.Tk):
             self.status_var.set(f"확인 필요: {game.title if game else game_id} · {error}")
 
     def _restore_library_status(self) -> None:
-        invalid_count = sum(bool(error) for error in self.validation_errors.values())
+        visible_ids = {game.id for game in self._visible_games()}
+        invalid_count = sum(bool(error) for game_id, error in self.validation_errors.items() if game_id in visible_ids)
         summary = f"확인 필요 {invalid_count}개" if invalid_count else "모두 실행 가능"
-        self.status_var.set(f"게임 {len(self.games)}개 · {summary} · Portable root: {self.paths.root}")
+        label = "게임" if self.active_library == "games" else "도구·서버"
+        self.status_var.set(f"{label} {len(visible_ids)}개 · {summary} · Portable root: {self.paths.root}")
 
     def _select_game(self, game_id: str, *, sync_tree: bool = True) -> None:
         self.selected_game_key = game_id if game_id in self.games else ""
@@ -413,7 +487,7 @@ class ManagerApp(tk.Tk):
         self.grid_cards.clear()
         self.grid_images.clear()
         titles = catalog_titles()
-        games = list(self.games.values())
+        games = self._visible_games()
         for row_start in range(0, len(games), columns):
             row_frame = tk.Frame(self.thumbnail_grid, background=COLORS["surface"])
             row_frame.pack(fill=tk.X)
@@ -449,7 +523,9 @@ class ManagerApp(tk.Tk):
                 height=2,
             )
         title_label.pack(fill=tk.X, padx=11, pady=(9, 1))
-        summary = " · ".join(item for item in (game.version, titles.get(game.game_type, game.game_type)) if item)
+        summary = " · ".join(
+            item for item in (game.version, self._item_type_title(game, titles)) if item
+        )
         summary_label = tk.Label(
                 card,
                 text=summary or "아케이드 게임",
@@ -461,11 +537,12 @@ class ManagerApp(tk.Tk):
             )
         summary_label.pack(fill=tk.X, padx=11, pady=(0, 10))
         error = self.validation_errors.get(game.id, "")
+        running = game.id in self.running_processes and self.running_processes[game.id].poll() is None
         status_label = tk.Label(
-                card,
-                text="● 실행 가능" if not error else "● 확인 필요",
-                background=COLORS["surface"],
-                foreground=COLORS["success"] if not error else COLORS["danger"],
+            card,
+            text="● 실행 중" if running else ("● 실행 가능" if not error else "● 확인 필요"),
+            background=COLORS["surface"],
+            foreground=COLORS["success"] if running or not error else COLORS["danger"],
                 font=("Segoe UI Semibold", 9),
                 anchor=tk.W,
             )
@@ -486,27 +563,44 @@ class ManagerApp(tk.Tk):
     def add_game(self) -> None:
         GameDialog(self, self.paths, self.store, self.detector, on_save=self._save_game)
 
+    def add_support_item(self) -> None:
+        self._set_library_tab("support")
+        SupportItemDialog(self, self.paths, self.store, on_save=self._save_game)
+
     def edit_game(self) -> None:
         game = self.selected_game()
         if not game:
-            messagebox.showinfo("게임 편집", "편집할 게임을 선택하세요.", parent=self)
+            messagebox.showinfo("항목 편집", "편집할 항목을 선택하세요.", parent=self)
             return
-        GameDialog(self, self.paths, self.store, self.detector, game=game, on_save=self._save_game)
+        if game.item_kind == "game":
+            GameDialog(self, self.paths, self.store, self.detector, game=game, on_save=self._save_game)
+        else:
+            SupportItemDialog(self, self.paths, self.store, item=game, on_save=self._save_game)
 
     def duplicate_game(self) -> None:
         game = self.selected_game()
         if not game:
-            messagebox.showinfo("게임 복제", "복제할 게임을 선택하세요.", parent=self)
+            messagebox.showinfo("항목 복제", "복제할 항목을 선택하세요.", parent=self)
             return
-        GameDialog(
-            self,
-            self.paths,
-            self.store,
-            self.detector,
-            game=game,
-            duplicate=True,
-            on_save=self._save_game,
-        )
+        if game.item_kind == "game":
+            GameDialog(
+                self,
+                self.paths,
+                self.store,
+                self.detector,
+                game=game,
+                duplicate=True,
+                on_save=self._save_game,
+            )
+        else:
+            SupportItemDialog(
+                self,
+                self.paths,
+                self.store,
+                item=game,
+                duplicate=True,
+                on_save=self._save_game,
+            )
 
     def _save_game(self, game: GameDefinition) -> bool:
         try:
@@ -524,7 +618,7 @@ class ManagerApp(tk.Tk):
         game = self.selected_game()
         if not game:
             return
-        if not messagebox.askyesno("게임 삭제", f"'{game.title}' 등록을 삭제할까요?\n게임 파일은 삭제되지 않습니다.", parent=self):
+        if not messagebox.askyesno("항목 삭제", f"'{game.title}' 등록을 삭제할까요?\n실제 파일은 삭제되지 않습니다.", parent=self):
             return
         try:
             self.store.delete(game.id)
@@ -536,26 +630,47 @@ class ManagerApp(tk.Tk):
     def launch_game(self) -> None:
         self._run_selected(configure=False)
 
+    def stop_selected(self) -> None:
+        item = self.selected_game()
+        if not item:
+            messagebox.showinfo("중지", "중지할 도구나 서버를 선택하세요.", parent=self)
+            return
+        process = self.running_processes.get(item.id)
+        if process is None or process.poll() is not None:
+            self.running_processes.pop(item.id, None)
+            messagebox.showinfo("중지", "이 프로그램에서 실행한 프로세스가 현재 동작 중이지 않습니다.", parent=self)
+            self.refresh()
+            return
+        try:
+            process.terminate()
+        except OSError as error:
+            messagebox.showerror("중지 실패", str(error), parent=self)
+            return
+        self.running_processes.pop(item.id, None)
+        self.refresh()
+        self.status_var.set(f"중지 요청: {item.title}")
+
     def configure_game(self) -> None:
         self._run_selected(configure=True)
 
-    def edit_runtime_paths(self) -> None:
+    def edit_settings(self) -> None:
         try:
             settings = self.runtime_settings_store.load()
         except ValueError as error:
             messagebox.showerror("런타임 설정 오류", str(error), parent=self)
             return
-        RuntimePathsDialog(self, self.paths, settings, self._save_runtime_settings)
+        SettingsDialog(self, self.paths, settings, self.view_mode, self._save_settings)
 
-    def _save_runtime_settings(self, settings: RuntimeSettings) -> bool:
+    def _save_settings(self, settings: RuntimeSettings, view_mode: str) -> bool:
         try:
             self.runtime_settings_store.save(settings)
         except (OSError, ValueError) as error:
-            messagebox.showerror("런타임 설정 저장 실패", str(error), parent=self)
+            messagebox.showerror("설정 저장 실패", str(error), parent=self)
             return False
         self.launcher.update_runtime_settings(settings)
+        self._set_view_mode(view_mode)
         self.refresh()
-        self.status_var.set("Spice2x 경로 설정을 저장했습니다.")
+        self.status_var.set("설정을 저장했습니다.")
         return True
 
     def _update_runtime_status(self) -> None:
@@ -568,86 +683,333 @@ class ManagerApp(tk.Tk):
     def _run_selected(self, *, configure: bool) -> None:
         game = self.selected_game()
         if not game:
-            messagebox.showinfo("실행", "게임을 선택하세요.", parent=self)
+            messagebox.showinfo("실행", "실행할 항목을 선택하세요.", parent=self)
             return
         try:
             plan = self.launcher.plan(game, configure=configure)
-            self.launcher.launch(game, configure=configure)
+            process = self.launcher.launch(game, configure=configure)
+            if not configure and game.item_kind in {"server", "tool"}:
+                self.running_processes[game.id] = process
             action = "설정 실행" if configure else "게임 실행"
+            if game.item_kind == "server" and not configure:
+                action = "서버 실행"
+            elif game.item_kind == "tool" and not configure:
+                action = "도구 실행"
             self.status_var.set(f"{action}: {game.title} · {subprocess.list2cmdline(plan.command)}")
+            if game.item_kind != "game" and not configure:
+                self.refresh()
+                self.status_var.set(f"{action}: {game.title}")
         except (OSError, ValueError) as error:
             messagebox.showerror("실행 실패", str(error), parent=self)
 
-    def convert_bat(self) -> None:
-        selected = filedialog.askopenfilename(
-            parent=self,
-            title="변환할 기존 BAT 선택",
-            filetypes=[("Batch file", "*.bat"), ("All files", "*.*")],
-        )
-        if not selected:
-            return
-        try:
-            conversion = self.bat_converter.preview(Path(selected))
-        except OSError as error:
-            messagebox.showerror("BAT 읽기 실패", str(error), parent=self)
-            return
-        if conversion.replacements == 0:
-            messagebox.showinfo("BAT 경로 변환", "변환할 spice 실행 파일 경로를 찾지 못했습니다.", parent=self)
-            return
+class SupportItemDialog(tk.Toplevel):
+    TYPE_LABELS = {"가상 서버": "server", "보조 도구": "tool"}
 
-        PreviewDialog(self, conversion.converted_text, conversion.replacements, lambda: self._apply_bat(conversion))
-
-    def _apply_bat(self, conversion) -> None:
-        try:
-            backup = self.bat_converter.apply(conversion)
-        except (OSError, ValueError) as error:
-            messagebox.showerror("BAT 변환 실패", str(error), parent=self)
-            return
-        messagebox.showinfo("BAT 변환 완료", f"spice 경로를 상대경로로 변경했습니다.\n백업: {backup}", parent=self)
-        self.status_var.set(f"BAT 변환 완료: {conversion.path}")
-
-
-class RuntimePathsDialog(tk.Toplevel):
-    def __init__(self, parent: ManagerApp, paths: PortablePaths, settings: RuntimeSettings, on_save):
+    def __init__(
+        self,
+        parent: ManagerApp,
+        paths: PortablePaths,
+        store: GameStore,
+        *,
+        item: GameDefinition | None = None,
+        duplicate: bool = False,
+        on_save,
+    ):
         super().__init__(parent)
         self.paths = paths
+        self.store = store
+        self.original = None if duplicate else item
         self.on_save = on_save
-        self.title("Spice2x 경로 설정")
-        self.geometry("760x450")
-        self.minsize(660, 420)
+        self.title("도구·서버 복제" if duplicate else ("도구·서버 편집" if item else "도구·서버 추가"))
+        self.geometry("760x630")
+        self.minsize(660, 560)
         self.configure(background=COLORS["background"])
         self.transient(parent)
         self.grab_set()
 
-        self.x86_var = tk.StringVar(value=settings.spice_x86_executable)
-        self.x64_var = tk.StringVar(value=settings.spice_x64_executable)
-        self.configurator_var = tk.StringVar(value=settings.spice_configurator)
-        self.config_var = tk.StringVar(value=settings.spice_config_path)
-        self._build()
+        current_kind = item.item_kind if item else "server"
+        kind_label = next(label for label, value in self.TYPE_LABELS.items() if value == current_kind)
+        self.kind_var = tk.StringVar(value=kind_label)
+        self.title_var = tk.StringVar(value=item.title if item else "")
+        self.version_var = tk.StringVar(value=item.version if item else "")
+        self.folder_var = tk.StringVar(value=str(paths.resolve(item.game_root)) if item else "")
+        self.executable_var = tk.StringVar(value=item.executable if item else "")
+        self.working_var = tk.StringVar(value=item.working_directory if item else ".")
+        self.thumbnail_var = tk.StringVar(value=item.thumbnail if item else "")
+        self._build(item)
 
-    def _build(self) -> None:
+    def _build(self, item: GameDefinition | None) -> None:
         form = ttk.Frame(self, style="App.TFrame", padding=20)
         form.pack(fill=tk.BOTH, expand=True)
         form.columnconfigure(1, weight=1)
-
-        ttk.Label(form, text="Spice2x 경로 설정", font=("Segoe UI Semibold", 18)).grid(
+        ttk.Label(form, text="도구 · 서버 등록", font=("Segoe UI Semibold", 18)).grid(
             row=0, column=0, columnspan=3, sticky=tk.W
         )
         ttk.Label(
             form,
-            text="모든 값은 portable root 기준 상대경로로 저장됩니다. 빈 실행 파일은 표준 위치와 PATH에서 자동 탐색합니다.",
+            text="게임 실행에 필요한 가상 서버와 보조 프로그램을 게임 라이브러리와 분리해 관리합니다.",
             foreground=COLORS["muted"],
-            wraplength=690,
-        ).grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(3, 16))
+        ).grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=(3, 14))
+
+        ttk.Label(form, text="유형").grid(row=2, column=0, sticky=tk.W, pady=6)
+        ttk.Combobox(form, textvariable=self.kind_var, values=list(self.TYPE_LABELS), state="readonly").grid(
+            row=2, column=1, columnspan=2, sticky=tk.EW, padx=8
+        )
+        for row, (label, variable) in enumerate(
+            (("이름", self.title_var), ("버전/설명", self.version_var)), start=3
+        ):
+            ttk.Label(form, text=label).grid(row=row, column=0, sticky=tk.W, pady=6)
+            ttk.Entry(form, textvariable=variable).grid(row=row, column=1, columnspan=2, sticky=tk.EW, padx=8)
+
+        ttk.Label(form, text="폴더").grid(row=5, column=0, sticky=tk.W, pady=6)
+        ttk.Entry(form, textvariable=self.folder_var).grid(row=5, column=1, sticky=tk.EW, padx=8)
+        ttk.Button(form, text="찾기", command=self._browse_folder).grid(row=5, column=2)
+        ttk.Label(form, text="실행 파일").grid(row=6, column=0, sticky=tk.W, pady=6)
+        ttk.Entry(form, textvariable=self.executable_var).grid(row=6, column=1, sticky=tk.EW, padx=8)
+        ttk.Button(form, text="찾기", command=self._browse_executable).grid(row=6, column=2)
+        ttk.Label(form, text="작업 폴더").grid(row=7, column=0, sticky=tk.W, pady=6)
+        ttk.Entry(form, textvariable=self.working_var).grid(row=7, column=1, columnspan=2, sticky=tk.EW, padx=8)
+        ttk.Label(form, text="썸네일").grid(row=8, column=0, sticky=tk.W, pady=6)
+        ttk.Entry(form, textvariable=self.thumbnail_var).grid(row=8, column=1, sticky=tk.EW, padx=8)
+        ttk.Button(form, text="찾기", command=self._browse_thumbnail).grid(row=8, column=2)
+
+        ttk.Label(form, text="추가 인자\n(한 줄에 하나)").grid(row=9, column=0, sticky=tk.NW, pady=6)
+        self.arguments_text = tk.Text(
+            form,
+            height=6,
+            wrap=tk.NONE,
+            background=COLORS["surface_alt"],
+            foreground=COLORS["text"],
+            insertbackground=COLORS["text"],
+            selectbackground=COLORS["accent"],
+            relief=tk.FLAT,
+            borderwidth=0,
+            padx=8,
+            pady=8,
+            font=("Cascadia Mono", 9),
+        )
+        self.arguments_text.grid(row=9, column=1, columnspan=2, sticky=tk.NSEW, padx=8)
+        form.rowconfigure(9, weight=1)
+        if item:
+            self.arguments_text.insert("1.0", "\n".join(item.arguments))
+
+        buttons = ttk.Frame(form, style="App.TFrame")
+        buttons.grid(row=10, column=0, columnspan=3, sticky=tk.E, pady=(16, 0))
+        ttk.Button(buttons, text="취소", style="Ghost.TButton", command=self.destroy).pack(side=tk.RIGHT, padx=(7, 0))
+        ttk.Button(buttons, text="저장", style="Primary.TButton", command=self._save).pack(side=tk.RIGHT)
+
+    def _tools_initial_directory(self) -> Path:
+        parent = self.paths.root.parent
+        if parent.name.casefold() == "_tools":
+            return parent
+        sibling = parent / "_tools"
+        return sibling if sibling.is_dir() else self.paths.root
+
+    def _browse_folder(self) -> None:
+        selected = filedialog.askdirectory(
+            parent=self,
+            title="도구 또는 서버 폴더 선택",
+            initialdir=str(self._tools_initial_directory()),
+        )
+        if not selected:
+            return
+        folder = Path(selected)
+        self.folder_var.set(str(folder))
+        if not self.title_var.get().strip():
+            self.title_var.set(folder.name.replace("_", " ").replace("-", " "))
+        candidates = sorted(
+            (path for path in folder.iterdir() if path.is_file() and path.suffix.lower() in {".exe", ".bat", ".cmd"}),
+            key=lambda path: (path.suffix.lower() != ".exe", path.name.casefold()),
+        )
+        if len(candidates) == 1:
+            self.executable_var.set(candidates[0].name)
+
+    def _folder_path(self) -> Path:
+        value = self.folder_var.get().strip()
+        if not value:
+            raise ValueError("도구 또는 서버 폴더를 선택하세요.")
+        path = Path(value)
+        return path.resolve() if path.is_absolute() else self.paths.resolve(value)
+
+    def _browse_executable(self) -> None:
+        try:
+            folder = self._folder_path()
+        except ValueError as error:
+            messagebox.showerror("실행 파일 선택", str(error), parent=self)
+            return
+        selected = filedialog.askopenfilename(
+            parent=self,
+            title="실행 파일 선택",
+            initialdir=str(folder),
+            filetypes=[("Executable", "*.exe *.bat *.cmd"), ("All files", "*.*")],
+        )
+        if selected:
+            self.executable_var.set(self.paths.relative(Path(selected), base=folder))
+
+    def _browse_thumbnail(self) -> None:
+        selected = filedialog.askopenfilename(
+            parent=self,
+            title="썸네일 선택",
+            initialdir=str(self.paths.root),
+            filetypes=[("Images", "*.png *.jpg *.jpeg *.gif *.webp *.bmp"), ("All files", "*.*")],
+        )
+        if selected:
+            self.thumbnail_var.set(self.paths.relative(Path(selected)))
+
+    def _save(self) -> None:
+        try:
+            folder = self._folder_path()
+            if not folder.is_dir():
+                raise FileNotFoundError(f"폴더가 없습니다: {folder}")
+            title = self.title_var.get().strip()
+            if not title:
+                raise ValueError("이름을 입력하세요.")
+            executable = self.executable_var.get().strip()
+            if not executable:
+                raise ValueError("실행 파일을 선택하세요.")
+            version = self.version_var.get().strip()
+            item_id = self.original.id if self.original else self.store.make_unique_id(title, version)
+            kind = self.TYPE_LABELS[self.kind_var.get()]
+            arguments = [line.strip() for line in self.arguments_text.get("1.0", tk.END).splitlines() if line.strip()]
+            item = GameDefinition(
+                id=item_id,
+                title=title,
+                version=version,
+                game_type=f"support-{kind}",
+                game_root=self.paths.relative(folder),
+                module_directory="",
+                architecture="x64",
+                thumbnail=self.thumbnail_var.get().strip(),
+                arguments=arguments,
+                launcher_type="direct",
+                executable=executable,
+                working_directory=self.working_var.get().strip() or ".",
+                item_kind=kind,
+            )
+        except (OSError, ValueError, KeyError) as error:
+            messagebox.showerror("저장 실패", str(error), parent=self)
+            return
+        if self.on_save(item):
+            self.destroy()
+
+
+class SettingsDialog(tk.Toplevel):
+    VIEW_MODES = {"썸네일": "thumbnail", "리스트": "list"}
+
+    def __init__(
+        self,
+        parent: ManagerApp,
+        paths: PortablePaths,
+        settings: RuntimeSettings,
+        view_mode: str,
+        on_save,
+    ):
+        super().__init__(parent)
+        self.paths = paths
+        self.on_save = on_save
+        self.title("설정")
+        self.geometry("820x570")
+        self.minsize(720, 520)
+        self.configure(background=COLORS["background"])
+        self.transient(parent)
+        self.grab_set()
+
+        view_label = next(
+            (label for label, value in self.VIEW_MODES.items() if value == view_mode),
+            "썸네일",
+        )
+        self.view_mode_var = tk.StringVar(value=view_label)
+        self.x86_var = tk.StringVar(value=settings.spice_x86_executable)
+        self.x64_var = tk.StringVar(value=settings.spice_x64_executable)
+        self.configurator_var = tk.StringVar(value=settings.spice_configurator)
+        self.config_var = tk.StringVar(value=settings.spice_config_path)
+        self.patch_config_var = tk.StringVar(value=settings.spice_patch_manager_config_path)
+        self.location_vars: list[tk.StringVar] = []
+        self._build()
+
+    def _build(self) -> None:
+        shell = ttk.Frame(self, style="App.TFrame", padding=20)
+        shell.pack(fill=tk.BOTH, expand=True)
+
+        ttk.Label(shell, text="설정", font=("Segoe UI Semibold", 18)).pack(anchor=tk.W)
+        ttk.Label(
+            shell,
+            text="저장 위치와 화면 표시, 공용 런타임 경로를 한곳에서 확인하고 변경합니다.",
+            foreground=COLORS["muted"],
+        ).pack(anchor=tk.W, pady=(3, 14))
+
+        notebook = ttk.Notebook(shell)
+        notebook.pack(fill=tk.BOTH, expand=True)
+
+        general = ttk.Frame(notebook, style="Surface.TFrame", padding=18)
+        spice = ttk.Frame(notebook, style="Surface.TFrame", padding=18)
+        notebook.add(general, text="일반")
+        notebook.add(spice, text="Spice2x")
+        self._build_general_tab(general)
+        self._build_spice_tab(spice)
+
+        buttons = ttk.Frame(shell, style="App.TFrame")
+        buttons.pack(fill=tk.X, pady=(14, 0))
+        ttk.Button(buttons, text="취소", style="Ghost.TButton", command=self.destroy).pack(side=tk.RIGHT, padx=(7, 0))
+        ttk.Button(buttons, text="저장", style="Primary.TButton", command=self._save).pack(side=tk.RIGHT)
+
+    def _build_general_tab(self, form: ttk.Frame) -> None:
+        form.columnconfigure(1, weight=1)
+        ttk.Label(form, text="화면", style="Section.TLabel").grid(
+            row=0, column=0, columnspan=2, sticky=tk.W, pady=(0, 8)
+        )
+        ttk.Label(form, text="라이브러리 보기", style="Surface.TLabel").grid(row=1, column=0, sticky=tk.W, pady=(0, 18))
+        ttk.Combobox(
+            form,
+            textvariable=self.view_mode_var,
+            values=list(self.VIEW_MODES),
+            state="readonly",
+            width=18,
+        ).grid(row=1, column=1, sticky=tk.W, padx=(14, 0), pady=(0, 18))
+
+        ttk.Separator(form).grid(row=2, column=0, columnspan=2, sticky=tk.EW, pady=(0, 16))
+        ttk.Label(form, text="현재 저장 위치", style="Section.TLabel").grid(
+            row=3, column=0, columnspan=2, sticky=tk.W, pady=(0, 4)
+        )
+        ttk.Label(
+            form,
+            text="업데이트해도 아래 폴더와 파일은 자동으로 이동하지 않습니다.",
+            style="Muted.TLabel",
+        ).grid(row=4, column=0, columnspan=2, sticky=tk.W, pady=(0, 10))
+
+        locations = (
+            ("Portable 루트", self.paths.root),
+            ("데이터 폴더", self.paths.root / "data"),
+            ("게임·도구 목록", self.paths.root / "data" / "games"),
+            ("런타임 설정", self.paths.root / "data" / "settings.json"),
+            ("화면 설정", self.paths.root / "data" / "ui.json"),
+            ("로그", self.paths.root / "data" / "logs" / "manager.log"),
+        )
+        for row, (label, location) in enumerate(locations, start=5):
+            ttk.Label(form, text=label, style="Surface.TLabel").grid(row=row, column=0, sticky=tk.W, pady=4)
+            variable = tk.StringVar(value=str(location))
+            self.location_vars.append(variable)
+            entry = ttk.Entry(form, textvariable=variable, state="readonly")
+            entry.grid(row=row, column=1, sticky=tk.EW, padx=(14, 0), pady=4)
+
+    def _build_spice_tab(self, form: ttk.Frame) -> None:
+        form.columnconfigure(1, weight=1)
+        ttk.Label(
+            form,
+            text="모든 값은 portable root 기준 상대경로로 저장됩니다. 빈 실행 파일은 표준 위치와 PATH에서 자동 탐색합니다.",
+            style="Muted.TLabel",
+            wraplength=700,
+        ).grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 14))
 
         fields = (
             ("x86 실행 파일", self.x86_var, "executable"),
             ("x64 실행 파일", self.x64_var, "executable"),
             ("Configurator", self.configurator_var, "executable"),
-            ("설정 파일", self.config_var, "config"),
+            ("설정 파일 (XML)", self.config_var, "xml"),
+            ("패치 관리자 설정 (JSON)", self.patch_config_var, "json"),
         )
-        for row, (label, variable, kind) in enumerate(fields, start=2):
-            ttk.Label(form, text=label).grid(row=row, column=0, sticky=tk.W, pady=7)
+        for row, (label, variable, kind) in enumerate(fields, start=1):
+            ttk.Label(form, text=label, style="Surface.TLabel").grid(row=row, column=0, sticky=tk.W, pady=7)
             ttk.Entry(form, textvariable=variable).grid(row=row, column=1, sticky=tk.EW, padx=9)
             ttk.Button(
                 form,
@@ -657,23 +1019,22 @@ class RuntimePathsDialog(tk.Toplevel):
 
         ttk.Label(
             form,
-            text="설정 파일을 비워 두면 -cfgpath를 전달하지 않습니다. 게임의 모듈 폴더를 비우면 -modules도 전달하지 않습니다.",
-            foreground=COLORS["muted"],
+            text="빈 설정 경로는 spice2x 기본값을 사용합니다. 패치 관리자 설정을 지정하면 -patchcfgpath로 전달합니다.",
+            style="Muted.TLabel",
             wraplength=690,
         ).grid(row=6, column=0, columnspan=3, sticky=tk.W, pady=(16, 8))
 
-        buttons = ttk.Frame(form, style="App.TFrame")
-        buttons.grid(row=7, column=0, columnspan=3, sticky=tk.E, pady=(16, 0))
-        ttk.Button(buttons, text="모두 자동", style="Ghost.TButton", command=self._clear).pack(side=tk.LEFT, padx=(0, 8))
-        ttk.Button(buttons, text="취소", style="Ghost.TButton", command=self.destroy).pack(side=tk.RIGHT, padx=(7, 0))
-        ttk.Button(buttons, text="저장", style="Primary.TButton", command=self._save).pack(side=tk.RIGHT)
+        ttk.Button(form, text="모두 자동", style="Ghost.TButton", command=self._clear).grid(
+            row=7, column=0, columnspan=3, sticky=tk.E, pady=(10, 0)
+        )
 
     def _browse(self, variable: tk.StringVar, kind: str) -> None:
-        filetypes = (
-            [("Windows executable", "*.exe"), ("All files", "*.*")]
-            if kind == "executable"
-            else [("XML config", "*.xml"), ("All files", "*.*")]
-        )
+        if kind == "executable":
+            filetypes = [("Windows executable", "*.exe"), ("All files", "*.*")]
+        elif kind == "json":
+            filetypes = [("JSON config", "*.json"), ("All files", "*.*")]
+        else:
+            filetypes = [("XML config", "*.xml"), ("All files", "*.*")]
         selected = filedialog.askopenfilename(
             parent=self,
             title="Spice2x 파일 선택",
@@ -684,7 +1045,13 @@ class RuntimePathsDialog(tk.Toplevel):
             variable.set(self.paths.relative(Path(selected)))
 
     def _clear(self) -> None:
-        for variable in (self.x86_var, self.x64_var, self.configurator_var, self.config_var):
+        for variable in (
+            self.x86_var,
+            self.x64_var,
+            self.configurator_var,
+            self.config_var,
+            self.patch_config_var,
+        ):
             variable.set("")
 
     def _save(self) -> None:
@@ -693,8 +1060,10 @@ class RuntimePathsDialog(tk.Toplevel):
             spice_x64_executable=self.x64_var.get().strip(),
             spice_configurator=self.configurator_var.get().strip(),
             spice_config_path=self.config_var.get().strip(),
+            spice_patch_manager_config_path=self.patch_config_var.get().strip(),
         )
-        if self.on_save(settings):
+        view_mode = self.VIEW_MODES.get(self.view_mode_var.get(), "thumbnail")
+        if self.on_save(settings, view_mode):
             self.destroy()
 
 
@@ -1011,51 +1380,6 @@ class GameDialog(tk.Toplevel):
             return
         if self.on_save(game):
             self.destroy()
-
-
-class PreviewDialog(tk.Toplevel):
-    def __init__(self, parent: tk.Misc, text: str, replacements: int, on_apply):
-        super().__init__(parent)
-        self.title("BAT 상대경로 변환 미리보기")
-        self.geometry("850x560")
-        self.configure(background=COLORS["background"])
-        self.transient(parent)
-        self.grab_set()
-
-        header = ttk.Frame(self, style="Surface.TFrame", padding=(16, 13))
-        header.pack(fill=tk.X, padx=14, pady=(14, 8))
-        ttk.Label(header, text="BAT 변환 미리보기", style="GameTitle.TLabel").pack(anchor=tk.W)
-        ttk.Label(header, text=f"spice 실행 경로 {replacements}곳을 변경합니다. 다른 명령과 인자는 유지됩니다.", style="Muted.TLabel").pack(anchor=tk.W, pady=(3, 0))
-        editor = tk.Text(
-            self,
-            wrap=tk.NONE,
-            background=COLORS["surface"],
-            foreground=COLORS["text"],
-            insertbackground=COLORS["text"],
-            selectbackground=COLORS["accent"],
-            relief=tk.FLAT,
-            borderwidth=0,
-            padx=12,
-            pady=12,
-            font=("Cascadia Mono", 9),
-        )
-        x_scroll = ttk.Scrollbar(self, orient=tk.HORIZONTAL, command=editor.xview)
-        y_scroll = ttk.Scrollbar(self, orient=tk.VERTICAL, command=editor.yview, style="Dark.Vertical.TScrollbar")
-        editor.configure(xscrollcommand=x_scroll.set, yscrollcommand=y_scroll.set)
-        editor.insert("1.0", text)
-        editor.configure(state=tk.DISABLED)
-        editor.pack(fill=tk.BOTH, expand=True, padx=10)
-        x_scroll.pack(fill=tk.X, padx=10)
-        y_scroll.place(relx=1.0, rely=0.08, relheight=0.82, anchor=tk.NE)
-        buttons = ttk.Frame(self, style="App.TFrame", padding=10)
-        buttons.pack(fill=tk.X)
-        ttk.Button(buttons, text="취소", style="Ghost.TButton", command=self.destroy).pack(side=tk.RIGHT, padx=(7, 0))
-
-        def apply_and_close() -> None:
-            on_apply()
-            self.destroy()
-
-        ttk.Button(buttons, text="백업 후 적용", style="Primary.TButton", command=apply_and_close).pack(side=tk.RIGHT)
 
 
 def run(paths: PortablePaths | None = None) -> None:

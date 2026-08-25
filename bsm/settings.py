@@ -14,6 +14,7 @@ class RuntimeSettings:
     spice_x64_executable: str = ""
     spice_configurator: str = ""
     spice_config_path: str = ""
+    spice_patch_manager_config_path: str = ""
 
     @classmethod
     def from_dict(cls, value: dict) -> "RuntimeSettings":
@@ -24,6 +25,7 @@ class RuntimeSettings:
                 spice_x64_executable=str(spice.get("x64Executable", "")),
                 spice_configurator=str(spice.get("configurator", "")),
                 spice_config_path=str(spice.get("configPath", "")),
+                spice_patch_manager_config_path=str(spice.get("patchManagerConfigPath", "")),
             )
 
         # Read the original example schema for existing installations.
@@ -46,12 +48,13 @@ class RuntimeSettings:
 
     def to_dict(self) -> dict:
         return {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "spice2x": {
                 "x86Executable": self.spice_x86_executable,
                 "x64Executable": self.spice_x64_executable,
                 "configurator": self.spice_configurator,
                 "configPath": self.spice_config_path,
+                "patchManagerConfigPath": self.spice_patch_manager_config_path,
             },
         }
 
@@ -75,6 +78,7 @@ class RuntimeSettingsStore:
             settings.spice_x64_executable,
             settings.spice_configurator,
             settings.spice_config_path,
+            settings.spice_patch_manager_config_path,
         ):
             if value:
                 self.paths.ensure_relative(value)

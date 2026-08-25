@@ -59,6 +59,10 @@ class GameStore:
         self.paths.ensure_relative(game.working_directory)
         if game.launcher_type not in {"spice2x", "direct"}:
             raise ValueError("지원하지 않는 실행 방식입니다.")
+        if game.item_kind not in {"game", "server", "tool"}:
+            raise ValueError("지원하지 않는 라이브러리 항목 유형입니다.")
+        if game.item_kind != "game" and game.launcher_type != "direct":
+            raise ValueError("도구와 서버는 일반 실행 파일 방식만 지원합니다.")
         if game.launcher_type == "direct":
             if not game.executable.strip():
                 raise ValueError("일반 실행 파일을 선택하세요.")

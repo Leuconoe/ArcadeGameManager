@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 3,
+  "id": "iidx-example",
+  "title": "beatmania IIDX",
+  "version": "32 Pinky Crush",
+  "gameType": "iidx",
+  "gameRoot": "games/iidx-example/contents",
+  "architecture": "x64",
+  "moduleDirectory": "modules",
+  "thumbnail": "data/thumbnails/iidx-example.webp",
+  "configProfile": "shared",
+  "arguments": [
+    "-w"
+  ],
+  "detectedDll": "bm2dx.dll",
+  "launcherType": "spice2x",
+  "executable": "",
+  "workingDirectory": ".",
+  "itemKind": "game"
+}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 import shutil
 from pathlib import Path
@@ -64,6 +65,11 @@ class SpiceLauncher:
             if self.settings.spice_config_path.strip()
             else None
         )
+        patch_manager_config_path = (
+            self.paths.resolve(self.settings.spice_patch_manager_config_path)
+            if self.settings.spice_patch_manager_config_path.strip()
+            else None
+        )
 
         missing = [
             (executable, "spice2x 실행 파일"),
@@ -73,6 +79,8 @@ class SpiceLauncher:
             missing.append((module_directory, "모듈 폴더"))
         if config_path is not None:
             missing.append((config_path, "spice2x 설정 파일"))
+        if patch_manager_config_path is not None:
+            missing.append((patch_manager_config_path, "spice2x 패치 관리자 설정 파일"))
         for path, description in missing:
             if not path.exists():
                 raise FileNotFoundError(f"{description}을(를) 찾을 수 없습니다: {path}")
@@ -82,6 +90,8 @@ class SpiceLauncher:
             arguments.extend(("-modules", str(module_directory)))
         if config_path is not None:
             arguments.extend(("-cfgpath", str(config_path)))
+        if patch_manager_config_path is not None:
+            arguments.extend(("-patchcfgpath", str(patch_manager_config_path)))
         if not configure:
             arguments.extend(game.arguments)
 
@@ -127,11 +137,13 @@ class DirectLauncher:
         if not working_directory.is_dir():
             raise ValueError(f"작업 폴더가 아닙니다: {working_directory}")
 
-        return LaunchPlan(
-            executable=str(executable),
-            working_directory=str(working_directory),
-            arguments=tuple(game.arguments),
-        )
+        if executable.suffix.lower() in {".bat", ".cmd"}:
+            return LaunchPlan(
+                executable=os.environ.get("COMSPEC", "cmd.exe"),
+                working_directory=str(working_directory),
+                arguments=("/d", "/c", str(executable), *game.arguments),
+            )
+        return LaunchPlan(str(executable), str(working_directory), tuple(game.arguments))
 
     def launch(self, game: GameDefinition, *, configure: bool = False) -> subprocess.Popen:
         plan = self.plan(game, configure=configure)

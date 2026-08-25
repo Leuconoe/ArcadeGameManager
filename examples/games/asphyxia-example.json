@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 3,
+  "id": "asphyxia-core",
+  "title": "Asphyxia Core",
+  "version": "",
+  "gameType": "support-server",
+  "gameRoot": "../_tools/asphyxia-core-win-x64",
+  "moduleDirectory": "",
+  "architecture": "x64",
+  "thumbnail": "",
+  "arguments": [],
+  "detectedDll": "",
+  "launcherType": "direct",
+  "executable": "asphyxia-core-x64.exe",
+  "workingDirectory": ".",
+  "itemKind": "server"
+}

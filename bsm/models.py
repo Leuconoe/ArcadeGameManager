@@ -19,6 +19,7 @@ class GameDefinition:
     launcher_type: str = "spice2x"
     executable: str = ""
     working_directory: str = "."
+    item_kind: str = "game"
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "GameDefinition":
@@ -36,12 +37,13 @@ class GameDefinition:
             launcher_type=str(value.get("launcherType", "spice2x")),
             executable=str(value.get("executable", "")),
             working_directory=str(value.get("workingDirectory", ".")),
+            item_kind=str(value.get("itemKind", "game")),
         )
 
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
         return {
-            "schemaVersion": 2,
+            "schemaVersion": 3,
             "id": raw["id"],
             "title": raw["title"],
             "version": raw["version"],
@@ -55,6 +57,7 @@ class GameDefinition:
             "launcherType": raw["launcher_type"],
             "executable": raw["executable"],
             "workingDirectory": raw["working_directory"],
+            "itemKind": raw["item_kind"],
         }
 
 

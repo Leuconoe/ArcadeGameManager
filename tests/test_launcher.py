@@ -1,4 +1,5 @@
 import tempfile
+import os
 import unittest
 from pathlib import Path
 
@@ -19,6 +20,7 @@ class SpiceLauncherTests(unittest.TestCase):
             (runtime / "spice64.exe").write_bytes(b"")
             (runtime / "spicecfg.exe").write_bytes(b"")
             (runtime / "spicetools.xml").write_text("<config />", encoding="utf-8")
+            (runtime / "spicetools_patch_manager.json").write_text("{}", encoding="utf-8")
             game = GameDefinition(
                 id="iidx-32",
                 title="beatmania IIDX",
@@ -32,7 +34,10 @@ class SpiceLauncherTests(unittest.TestCase):
 
             plan = SpiceLauncher(
                 PortablePaths(root),
-                RuntimeSettings(spice_config_path="spice2x/spicetools.xml"),
+                RuntimeSettings(
+                    spice_config_path="spice2x/spicetools.xml",
+                    spice_patch_manager_config_path="spice2x/spicetools_patch_manager.json",
+                ),
             ).plan(game)
 
             self.assertEqual(Path(plan.executable), runtime / "spice64.exe")
@@ -41,7 +46,9 @@ class SpiceLauncherTests(unittest.TestCase):
             self.assertEqual(Path(plan.arguments[1]), modules)
             self.assertEqual(plan.arguments[2], "-cfgpath")
             self.assertEqual(Path(plan.arguments[3]), runtime / "spicetools.xml")
-            self.assertEqual(plan.arguments[4], "-w")
+            self.assertEqual(plan.arguments[4], "-patchcfgpath")
+            self.assertEqual(Path(plan.arguments[5]), runtime / "spicetools_patch_manager.json")
+            self.assertEqual(plan.arguments[6], "-w")
 
     def test_configurator_uses_same_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -52,16 +59,24 @@ class SpiceLauncherTests(unittest.TestCase):
             game_root.mkdir(parents=True)
             (runtime / "spicecfg.exe").write_bytes(b"")
             (runtime / "spicetools.xml").write_text("<config />", encoding="utf-8")
+            (runtime / "spicetools_patch_manager.json").write_text("{}", encoding="utf-8")
             game = GameDefinition("sdvx", "SDVX", "", "sdvx", "games/sdvx", ".", "x64")
 
             plan = SpiceLauncher(
                 PortablePaths(root),
-                RuntimeSettings(spice_config_path="spice2x/spicetools.xml"),
+                RuntimeSettings(
+                    spice_config_path="spice2x/spicetools.xml",
+                    spice_patch_manager_config_path="spice2x/spicetools_patch_manager.json",
+                ),
             ).plan(game, configure=True)
 
             self.assertEqual(Path(plan.executable), runtime / "spicecfg.exe")
             self.assertEqual(plan.arguments[0], "-modules")
             self.assertEqual(Path(plan.arguments[1]), game_root)
+            self.assertEqual(plan.arguments[2], "-cfgpath")
+            self.assertEqual(Path(plan.arguments[3]), runtime / "spicetools.xml")
+            self.assertEqual(plan.arguments[4], "-patchcfgpath")
+            self.assertEqual(Path(plan.arguments[5]), runtime / "spicetools_patch_manager.json")
 
     def test_omits_optional_paths_when_left_blank(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -156,6 +171,31 @@ class ExtensibleLauncherTests(unittest.TestCase):
             error = GameLauncher(PortablePaths(root)).validation_error(game)
 
             self.assertIn("게임 실행 파일", error)
+
+    def test_batch_support_tool_is_wrapped_with_cmd(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            tool_root = root / "_tools" / "server"
+            tool_root.mkdir(parents=True)
+            script = tool_root / "start-server.bat"
+            script.write_text("@echo off\n", encoding="utf-8")
+            item = GameDefinition(
+                id="server",
+                title="Virtual Server",
+                version="",
+                game_type="support-server",
+                game_root=PortablePaths(root).relative(tool_root),
+                module_directory="",
+                launcher_type="direct",
+                executable="start-server.bat",
+                item_kind="server",
+            )
+
+            plan = DirectLauncher(PortablePaths(root)).plan(item)
+
+            self.assertEqual(plan.executable, os.environ.get("COMSPEC", "cmd.exe"))
+            self.assertEqual(plan.arguments[:2], ("/d", "/c"))
+            self.assertEqual(Path(plan.arguments[2]), script.resolve())
 
 
 if __name__ == "__main__":

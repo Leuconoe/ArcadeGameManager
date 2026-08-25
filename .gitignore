@@ -5,11 +5,12 @@ artifacts/
 build/
 dist/
 *.spec
+!ArcadeGameManager.spec
 
 # Local runtime binaries and user data
 runtime/
 data/
-games/
+/games/
 spice2x/
 .tools/
 .bsm-root

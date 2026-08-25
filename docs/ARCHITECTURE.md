@@ -2,7 +2,7 @@
 
 ## 결론
 
-Windows용 `Python + tkinter GUI + 공용 실행 코어` 구조를 사용합니다. 게임 실행은 GUI가 담당하고, 기존 BAT는 그대로 유지하면서 spice 실행 파일 경로만 중앙 런타임 상대경로로 변환할 수 있습니다.
+Windows용 `Python + tkinter GUI + 공용 실행 코어` 구조를 사용합니다. 게임 실행은 GUI가 담당하며, 게임별 실행 정보는 JSON manifest로 관리합니다.
 
 1차 버전에서 중요한 것은 UI보다 중앙 런타임 실행의 안정성입니다.
 
@@ -25,7 +25,8 @@ ArcadeGameManager/
 │  ├─ spice.exe
 │  ├─ spice64.exe
 │  ├─ spicecfg.exe
-│  └─ spicetools.xml                # 현재의 공용 설정 파일
+│  ├─ spicetools.xml                # 현재의 공용 설정 파일
+│  └─ spicetools_patch_manager.json # 선택적인 공용 패치 설정
 ├─ data/
 │  ├─ settings.json
 │  ├─ games/
@@ -56,6 +57,7 @@ Executable       = <runtime>\spice.exe 또는 spice64.exe
 WorkingDirectory = <gameRoot>
 Arguments        = [-modules <moduleDirectory>]
                    [-cfgpath <configPath>]
+                   [-patchcfgpath <patchManagerConfigPath>]
                    <게임 공통 인자>
                    <선택한 실행 프로필 인자>
 ```
@@ -64,7 +66,7 @@ Arguments        = [-modules <moduleDirectory>]
 - `moduleDirectory`는 게임에 따라 게임 루트 또는 `<gameRoot>\modules`일 수 있으므로 manifest에서 지정합니다.
 - 설정 파일에는 절대경로를 저장하지 않습니다. `moduleDirectory`, `cfgpath` 및 다른 경로는 실행 직전에만 메모리에서 현재 위치에 맞는 절대경로로 해석합니다. 생성된 절대경로는 설정에 다시 기록하지 않습니다.
 - 문자열 하나로 명령행을 합치지 말고 .NET `ProcessStartInfo.ArgumentList`에 인자를 하나씩 넣습니다. 공백과 따옴표가 들어간 경로가 안전해집니다.
-- Configurator도 선택된 `spicecfg.exe`에 지정된 `-modules`, `-cfgpath`를 전달합니다. 비어 있는 선택 인자는 전달하지 않습니다.
+- Configurator도 선택된 `spicecfg.exe`에 지정된 `-modules`, `-cfgpath`, `-patchcfgpath`를 전달합니다. 비어 있는 선택 인자는 전달하지 않습니다.
 
 ## 상대경로 규칙
 
@@ -76,6 +78,7 @@ portable 기준점(`portableRoot`)은 프로세스의 현재 작업 폴더가 �
 |---|---|---|
 | `spice2x.*Executable` | `portableRoot` | `spice2x/spice64.exe` 또는 빈 값 |
 | `spice2x.configPath` | `portableRoot` | `spice2x/spicetools.xml` 또는 빈 값 |
+| `spice2x.patchManagerConfigPath` | `portableRoot` | `spice2x/spicetools_patch_manager.json` 또는 빈 값 |
 | `gameRoot` | `portableRoot` | `games/iidx-32/contents` |
 | `thumbnail` | `portableRoot` | `data/thumbnails/iidx-32.webp` |
 | `moduleDirectory` | 해당 `gameRoot` | `modules` 또는 `.` |
@@ -89,6 +92,7 @@ gameRoot     = FullPath(portableRoot + manifest.gameRoot)
 modulePath   = FullPath(gameRoot + manifest.moduleDirectory)
 runtimePath  = FullPath(portableRoot + settings.spice2x.*Executable)
 configPath   = FullPath(portableRoot + settings.spice2x.configPath)
+patchConfig  = FullPath(portableRoot + settings.spice2x.patchManagerConfigPath)
 thumbnail    = FullPath(portableRoot + manifest.thumbnail)
 ```
 
@@ -105,6 +109,8 @@ thumbnail    = FullPath(portableRoot + manifest.thumbnail)
 ## 게임 추가와 DLL 감지
 
 게임 추가는 두 가지 흐름을 지원합니다.
+
+게임이 아닌 실행 항목은 `itemKind`를 `server` 또는 `tool`로 저장하고 `도구 · 서버` 탭에서 분리해 표시합니다. 이 항목은 `direct` launcher만 사용하며 EXE, BAT, CMD를 지원합니다. `../_tools/asphyxia-core-win-x64`처럼 portable root 바깥의 형제 폴더도 상대경로로 저장할 수 있습니다. 관리자가 시작한 프로세스 핸들은 현재 세션 동안 유지해 실행 상태와 중지 기능에 사용합니다.
 
 ### 게임 계열을 먼저 지정
 
@@ -143,16 +149,17 @@ IIDX_32_Pinky_Crush
 
 ### 전역 설정
 
-`settings.json`에는 선택적으로 spice2x 관련 파일 경로를 둡니다. 실행 파일 경로가 비어 있으면 표준 위치와 PATH에서 찾고, 설정 파일이 비어 있으면 `-cfgpath`를 생략합니다.
+`settings.json`에는 선택적으로 spice2x 관련 파일 경로를 둡니다. 실행 파일 경로가 비어 있으면 표준 위치와 PATH에서 찾습니다. 설정 파일 경로가 비어 있으면 각각 `-cfgpath`, `-patchcfgpath`를 생략해 spice2x 기본값을 사용합니다.
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "spice2x": {
     "x86Executable": "spice2x/spice.exe",
     "x64Executable": "spice2x/spice64.exe",
     "configurator": "spice2x/spicecfg.exe",
-    "configPath": "spice2x/spicetools.xml"
+    "configPath": "spice2x/spicetools.xml",
+    "patchManagerConfigPath": "spice2x/spicetools_patch_manager.json"
   }
 }
 ```
@@ -180,7 +187,7 @@ IIDX_32_Pinky_Crush
 }
 ```
 
-`arguments`는 게임에 필요한 사용자 인자입니다. GUI에서는 한 줄에 인자 하나씩 입력합니다. `-modules`와 `-cfgpath`는 해당 경로가 지정된 경우에만 실행 코어가 자동으로 추가합니다.
+`arguments`는 게임에 필요한 사용자 인자입니다. GUI에서는 한 줄에 인자 하나씩 입력합니다. `-modules`, `-cfgpath`, `-patchcfgpath`는 해당 경로가 지정된 경우에만 실행 코어가 자동으로 추가합니다.
 
 환경 변수나 사전 실행 작업이 필요한 게임이 확인되면 다음과 같이 구조화된 필드로 확장합니다. 임의의 shell 문자열을 그대로 실행하는 방식은 경로 quoting과 보안 문제가 있어 피하는 것이 좋습니다.
 
@@ -208,7 +215,6 @@ bsm/
 ├─ detector.py        # 폴더 탐색, 게임/아키텍처/메타데이터 제안
 ├─ store.py           # data/games/*.json 원자적 저장
 ├─ launcher.py        # 중앙 spice2x 실행 계획과 프로세스 실행
-├─ bat_converter.py   # 기존 BAT의 spice 토큰만 상대경로로 치환
 ├─ thumbnail.py       # 이미지 로딩
 └─ ui.py              # tkinter GUI
 tests/                # 표준 unittest 코어 테스트
@@ -236,19 +242,6 @@ tests/                # 표준 unittest 코어 테스트
 
 게임 편집 화면에는 제목, 버전, 게임 계열, 게임 루트, x86/x64, 모듈 폴더, 썸네일과 추가 인자를 둡니다. spice2x의 수백 개 옵션을 GUI에서 다시 구현하지 않고 Configurator를 중앙 런타임으로 실행합니다.
 
-## 기존 BAT 상대경로 변환
-
-GUI의 `BAT 경로 변환`은 기존 BAT 전체를 다시 만들지 않습니다. 주석, `pushd`, 환경 변수, 게임별 인자와 다른 명령은 그대로 두고 `spice.exe`, `spice64.exe`, `spicecfg.exe` 실행 토큰만 BAT 위치 기준의 `%~dp0` 상대경로로 바꿉니다.
-
-```bat
-"C:\old spice\spice64.exe" -w -url http://localhost
-
-rem 변환 후 예시
-"%~dp0..\..\ArcadeGameManager\spice2x\spice64.exe" -w -url http://localhost
-```
-
-적용 전에 변환 결과를 GUI에서 보여주며, 승인하면 원본 옆에 `.bak`, `.bak.2` 순서로 백업을 만든 뒤 원자적으로 교체합니다. 주석 안에 있는 `spice64.exe` 문자열은 변경하지 않습니다.
-
 ## 기존 설치 마이그레이션
 
 실행 파일 제거는 다음 순서가 안전합니다.
@@ -265,8 +258,7 @@ rem 변환 후 예시
 
 1. 상대경로 모델, DLL 감지, JSON 저장, `LaunchPlan` 생성 및 검증 — 구현됨
 2. 중앙 `spice.exe/spice64.exe/spicecfg.exe` 실행 — 구현됨
-3. 기존 BAT의 spice 경로 변환, 미리보기와 백업 — 구현됨
-4. 게임 추가/편집/삭제/실행 GUI — 구현됨
-5. 실제 보유 게임별 DLL 카탈로그 검증 및 규칙 보완
-6. 실행 로그 보기와 기존 게임 폴더의 중복 spice 실행 파일 정리 도구
-7. spice2x 업데이트 전 백업과 롤백
+3. 게임 추가/편집/삭제/실행 GUI — 구현됨
+4. 실제 보유 게임별 DLL 카탈로그 검증 및 규칙 보완
+5. 실행 로그 보기와 기존 게임 폴더의 중복 spice 실행 파일 정리 도구
+6. spice2x 업데이트 전 백업과 롤백

@@ -15,6 +15,7 @@ class RuntimeSettingsStoreTests(unittest.TestCase):
                 spice_x64_executable="runtime/spice64.exe",
                 spice_configurator="runtime/spicecfg.exe",
                 spice_config_path="profiles/shared.xml",
+                spice_patch_manager_config_path="profiles/spicetools_patch_manager.json",
             )
 
             store.save(expected)
