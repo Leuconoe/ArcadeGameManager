@@ -92,6 +92,12 @@ class SpiceLauncher:
             arguments.extend(("-cfgpath", str(config_path)))
         if patch_manager_config_path is not None:
             arguments.extend(("-patchcfgpath", str(patch_manager_config_path)))
+        if self.settings.spice_local_ea:
+            arguments.append("-ea")
+        if self.settings.spice_service_url.strip():
+            arguments.extend(("-url", self.settings.spice_service_url.strip()))
+        if self.settings.spice_card0.strip():
+            arguments.extend(("-card0", self.settings.spice_card0.strip()))
         if not configure:
             arguments.extend(game.arguments)
 

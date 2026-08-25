@@ -1,10 +1,13 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "spice2x": {
     "x86Executable": "spice2x/spice.exe",
     "x64Executable": "spice2x/spice64.exe",
     "configurator": "spice2x/spicecfg.exe",
     "configPath": "spice2x/spicetools.xml",
-    "patchManagerConfigPath": "spice2x/spicetools_patch_manager.json"
+    "patchManagerConfigPath": "spice2x/spicetools_patch_manager.json",
+    "localEa": false,
+    "serviceUrl": "example.com:8083",
+    "card0": "E0040100FFFFFFFF"
   }
 }

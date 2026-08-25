@@ -58,6 +58,9 @@ WorkingDirectory = <gameRoot>
 Arguments        = [-modules <moduleDirectory>]
                    [-cfgpath <configPath>]
                    [-patchcfgpath <patchManagerConfigPath>]
+                   [-ea]
+                   [-url <serviceUrl>]
+                   [-card0 <cardNumber>]
                    <게임 공통 인자>
                    <선택한 실행 프로필 인자>
 ```
@@ -65,8 +68,8 @@ Arguments        = [-modules <moduleDirectory>]
 - `WorkingDirectory`는 게임 루트로 고정합니다. `prop`, `dev`, `game` 등 상대경로를 사용하는 게임을 위해 필요합니다.
 - `moduleDirectory`는 게임에 따라 게임 루트 또는 `<gameRoot>\modules`일 수 있으므로 manifest에서 지정합니다.
 - 설정 파일에는 절대경로를 저장하지 않습니다. `moduleDirectory`, `cfgpath` 및 다른 경로는 실행 직전에만 메모리에서 현재 위치에 맞는 절대경로로 해석합니다. 생성된 절대경로는 설정에 다시 기록하지 않습니다.
-- 문자열 하나로 명령행을 합치지 말고 .NET `ProcessStartInfo.ArgumentList`에 인자를 하나씩 넣습니다. 공백과 따옴표가 들어간 경로가 안전해집니다.
-- Configurator도 선택된 `spicecfg.exe`에 지정된 `-modules`, `-cfgpath`, `-patchcfgpath`를 전달합니다. 비어 있는 선택 인자는 전달하지 않습니다.
+- 문자열 하나로 명령행을 합치지 말고 Python `subprocess.Popen`에 인자 목록을 전달합니다. 공백과 따옴표가 들어간 경로가 안전해집니다.
+- Configurator도 선택된 `spicecfg.exe`에 지정된 `-modules`, `-cfgpath`, `-patchcfgpath`, 네트워크 전역 인자를 전달합니다. 비어 있는 선택 인자는 전달하지 않습니다.
 
 ## 상대경로 규칙
 
@@ -79,6 +82,8 @@ portable 기준점(`portableRoot`)은 프로세스의 현재 작업 폴더가 �
 | `spice2x.*Executable` | `portableRoot` | `spice2x/spice64.exe` 또는 빈 값 |
 | `spice2x.configPath` | `portableRoot` | `spice2x/spicetools.xml` 또는 빈 값 |
 | `spice2x.patchManagerConfigPath` | `portableRoot` | `spice2x/spicetools_patch_manager.json` 또는 빈 값 |
+| `spice2x.serviceUrl` | 경로 아님 | `example.com:8083` 또는 빈 값 |
+| `spice2x.card0` | 경로 아님 | 16자리 16진수 카드 번호 또는 빈 값 |
 | `gameRoot` | `portableRoot` | `games/iidx-32/contents` |
 | `thumbnail` | `portableRoot` | `data/thumbnails/iidx-32.webp` |
 | `moduleDirectory` | 해당 `gameRoot` | `modules` 또는 `.` |
@@ -153,17 +158,20 @@ IIDX_32_Pinky_Crush
 
 ### 전역 설정
 
-`settings.json`에는 선택적으로 spice2x 관련 파일 경로를 둡니다. 실행 파일 경로가 비어 있으면 표준 위치와 PATH에서 찾습니다. 설정 파일 경로가 비어 있으면 각각 `-cfgpath`, `-patchcfgpath`를 생략해 spice2x 기본값을 사용합니다.
+`settings.json`에는 선택적으로 spice2x 관련 파일 경로와 전역 네트워크 값을 둡니다. 실행 파일 경로가 비어 있으면 표준 위치와 PATH에서 찾습니다. 설정 파일 경로가 비어 있으면 각각 `-cfgpath`, `-patchcfgpath`를 생략해 spice2x 기본값을 사용합니다. `localEa`, `serviceUrl`, `card0`도 비어 있거나 꺼져 있으면 해당 인자를 생략합니다.
 
 ```json
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "spice2x": {
     "x86Executable": "spice2x/spice.exe",
     "x64Executable": "spice2x/spice64.exe",
     "configurator": "spice2x/spicecfg.exe",
     "configPath": "spice2x/spicetools.xml",
-    "patchManagerConfigPath": "spice2x/spicetools_patch_manager.json"
+    "patchManagerConfigPath": "spice2x/spicetools_patch_manager.json",
+    "localEa": false,
+    "serviceUrl": "example.com:8083",
+    "card0": "E0040100FFFFFFFF"
   }
 }
 ```
@@ -191,7 +199,7 @@ IIDX_32_Pinky_Crush
 }
 ```
 
-`arguments`는 게임에 필요한 사용자 인자입니다. GUI에서는 한 줄에 인자 하나씩 입력합니다. `-modules`, `-cfgpath`, `-patchcfgpath`는 해당 경로가 지정된 경우에만 실행 코어가 자동으로 추가합니다.
+`arguments`는 게임에 필요한 사용자 인자입니다. GUI에서는 한 줄에 인자 하나씩 입력합니다. `-modules`, `-cfgpath`, `-patchcfgpath`, `-ea`, `-url`, `-card0`은 전역 설정에 따라 실행 코어가 자동으로 추가합니다.
 
 환경 변수나 사전 실행 작업이 필요한 게임이 확인되면 다음과 같이 구조화된 필드로 확장합니다. 임의의 shell 문자열을 그대로 실행하는 방식은 경로 quoting과 보안 문제가 있어 피하는 것이 좋습니다.
 

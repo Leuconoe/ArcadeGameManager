@@ -939,11 +939,12 @@ class SettingsDialog(tk.Toplevel):
         self.paths = paths
         self.on_save = on_save
         self.title("설정")
-        self.geometry("820x570")
-        self.minsize(720, 520)
+        self.geometry("820x650")
+        self.minsize(720, 600)
         self.configure(background=COLORS["background"])
         self.transient(parent)
         self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self._save)
 
         view_label = next(
             (label for label, value in self.VIEW_MODES.items() if value == view_mode),
@@ -955,6 +956,9 @@ class SettingsDialog(tk.Toplevel):
         self.configurator_var = tk.StringVar(value=settings.spice_configurator)
         self.config_var = tk.StringVar(value=settings.spice_config_path)
         self.patch_config_var = tk.StringVar(value=settings.spice_patch_manager_config_path)
+        self.local_ea_var = tk.BooleanVar(value=settings.spice_local_ea)
+        self.service_url_var = tk.StringVar(value=settings.spice_service_url)
+        self.card0_var = tk.StringVar(value=settings.spice_card0)
         self.location_vars: list[tk.StringVar] = []
         self._build()
 
@@ -981,8 +985,8 @@ class SettingsDialog(tk.Toplevel):
 
         buttons = ttk.Frame(shell, style="App.TFrame")
         buttons.pack(fill=tk.X, pady=(14, 0))
-        ttk.Button(buttons, text="취소", style="Ghost.TButton", command=self.destroy).pack(side=tk.RIGHT, padx=(7, 0))
-        ttk.Button(buttons, text="저장", style="Primary.TButton", command=self._save).pack(side=tk.RIGHT)
+        ttk.Button(buttons, text="변경 취소", style="Ghost.TButton", command=self.destroy).pack(side=tk.RIGHT, padx=(7, 0))
+        ttk.Button(buttons, text="저장 후 닫기", style="Primary.TButton", command=self._save).pack(side=tk.RIGHT)
 
     def _build_general_tab(self, form: ttk.Frame) -> None:
         form.columnconfigure(1, weight=1)
@@ -1056,8 +1060,31 @@ class SettingsDialog(tk.Toplevel):
             wraplength=690,
         ).grid(row=6, column=0, columnspan=3, sticky=tk.W, pady=(16, 8))
 
-        ttk.Button(form, text="모두 자동", style="Ghost.TButton", command=self._clear).grid(
-            row=7, column=0, columnspan=3, sticky=tk.E, pady=(10, 0)
+        ttk.Separator(form).grid(row=7, column=0, columnspan=3, sticky=tk.EW, pady=(8, 12))
+        ttk.Checkbutton(
+            form,
+            text="로컬 서버 에뮬레이션 (-ea)",
+            variable=self.local_ea_var,
+        ).grid(row=8, column=0, columnspan=3, sticky=tk.W, pady=4)
+        ttk.Label(form, text="원격 서버 주소 (-url)", style="Surface.TLabel").grid(
+            row=9, column=0, sticky=tk.W, pady=7
+        )
+        ttk.Entry(form, textvariable=self.service_url_var).grid(row=9, column=1, columnspan=2, sticky=tk.EW, padx=9)
+        ttk.Label(form, text="플레이어 1 카드 (-card0)", style="Surface.TLabel").grid(
+            row=10, column=0, sticky=tk.W, pady=7
+        )
+        ttk.Entry(form, textvariable=self.card0_var).grid(row=10, column=1, columnspan=2, sticky=tk.EW, padx=9)
+        ttk.Label(
+            form,
+            text="카드 번호는 16자리 16진수로 입력합니다. 빈 네트워크 값은 해당 인자를 전달하지 않습니다.",
+            style="Muted.TLabel",
+        ).grid(row=11, column=0, columnspan=3, sticky=tk.W, pady=(8, 0))
+
+        spice_buttons = ttk.Frame(form, style="Surface.TFrame")
+        spice_buttons.grid(row=12, column=0, columnspan=3, sticky=tk.E, pady=(10, 0))
+        ttk.Button(spice_buttons, text="모두 자동", style="Ghost.TButton", command=self._clear).pack(side=tk.LEFT)
+        ttk.Button(spice_buttons, text="저장", style="Primary.TButton", command=self._save).pack(
+            side=tk.LEFT, padx=(7, 0)
         )
 
     def _browse(self, variable: tk.StringVar, kind: str) -> None:
@@ -1083,8 +1110,11 @@ class SettingsDialog(tk.Toplevel):
             self.configurator_var,
             self.config_var,
             self.patch_config_var,
+            self.service_url_var,
+            self.card0_var,
         ):
             variable.set("")
+        self.local_ea_var.set(False)
 
     def _save(self) -> None:
         settings = RuntimeSettings(
@@ -1093,6 +1123,9 @@ class SettingsDialog(tk.Toplevel):
             spice_configurator=self.configurator_var.get().strip(),
             spice_config_path=self.config_var.get().strip(),
             spice_patch_manager_config_path=self.patch_config_var.get().strip(),
+            spice_local_ea=self.local_ea_var.get(),
+            spice_service_url=self.service_url_var.get().strip(),
+            spice_card0=self.card0_var.get().strip(),
         )
         view_mode = self.VIEW_MODES.get(self.view_mode_var.get(), "thumbnail")
         if self.on_save(settings, view_mode):

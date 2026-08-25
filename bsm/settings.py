@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 
@@ -15,6 +16,9 @@ class RuntimeSettings:
     spice_configurator: str = ""
     spice_config_path: str = ""
     spice_patch_manager_config_path: str = ""
+    spice_local_ea: bool = False
+    spice_service_url: str = ""
+    spice_card0: str = ""
 
     @classmethod
     def from_dict(cls, value: dict) -> "RuntimeSettings":
@@ -26,6 +30,9 @@ class RuntimeSettings:
                 spice_configurator=str(spice.get("configurator", "")),
                 spice_config_path=str(spice.get("configPath", "")),
                 spice_patch_manager_config_path=str(spice.get("patchManagerConfigPath", "")),
+                spice_local_ea=bool(spice.get("localEa", False)),
+                spice_service_url=str(spice.get("serviceUrl", "")),
+                spice_card0=str(spice.get("card0", "")),
             )
 
         # Read the original example schema for existing installations.
@@ -48,13 +55,16 @@ class RuntimeSettings:
 
     def to_dict(self) -> dict:
         return {
-            "schemaVersion": 3,
+            "schemaVersion": 4,
             "spice2x": {
                 "x86Executable": self.spice_x86_executable,
                 "x64Executable": self.spice_x64_executable,
                 "configurator": self.spice_configurator,
                 "configPath": self.spice_config_path,
                 "patchManagerConfigPath": self.spice_patch_manager_config_path,
+                "localEa": self.spice_local_ea,
+                "serviceUrl": self.spice_service_url,
+                "card0": self.spice_card0,
             },
         }
 
@@ -82,6 +92,11 @@ class RuntimeSettingsStore:
         ):
             if value:
                 self.paths.ensure_relative(value)
+
+        settings.spice_service_url = settings.spice_service_url.strip()
+        settings.spice_card0 = settings.spice_card0.strip().upper()
+        if settings.spice_card0 and not re.fullmatch(r"[0-9A-F]{16}", settings.spice_card0):
+            raise ValueError("플레이어 1 카드 번호는 16자리 16진수여야 합니다.")
 
         self.path.parent.mkdir(parents=True, exist_ok=True)
         handle, temporary_name = tempfile.mkstemp(prefix=".settings.", suffix=".tmp", dir=self.path.parent)

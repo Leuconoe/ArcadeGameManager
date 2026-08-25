@@ -37,6 +37,9 @@ class SpiceLauncherTests(unittest.TestCase):
                 RuntimeSettings(
                     spice_config_path="spice2x/spicetools.xml",
                     spice_patch_manager_config_path="spice2x/spicetools_patch_manager.json",
+                    spice_local_ea=True,
+                    spice_service_url="example.com:8083",
+                    spice_card0="E0040100ABCDEF12",
                 ),
             ).plan(game)
 
@@ -48,7 +51,12 @@ class SpiceLauncherTests(unittest.TestCase):
             self.assertEqual(Path(plan.arguments[3]), runtime / "spicetools.xml")
             self.assertEqual(plan.arguments[4], "-patchcfgpath")
             self.assertEqual(Path(plan.arguments[5]), runtime / "spicetools_patch_manager.json")
-            self.assertEqual(plan.arguments[6], "-w")
+            self.assertEqual(plan.arguments[6:], (
+                "-ea",
+                "-url", "example.com:8083",
+                "-card0", "E0040100ABCDEF12",
+                "-w",
+            ))
 
     def test_configurator_uses_same_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -67,6 +75,9 @@ class SpiceLauncherTests(unittest.TestCase):
                 RuntimeSettings(
                     spice_config_path="spice2x/spicetools.xml",
                     spice_patch_manager_config_path="spice2x/spicetools_patch_manager.json",
+                    spice_local_ea=True,
+                    spice_service_url="example.com:8083",
+                    spice_card0="E0040100ABCDEF12",
                 ),
             ).plan(game, configure=True)
 
@@ -77,6 +88,11 @@ class SpiceLauncherTests(unittest.TestCase):
             self.assertEqual(Path(plan.arguments[3]), runtime / "spicetools.xml")
             self.assertEqual(plan.arguments[4], "-patchcfgpath")
             self.assertEqual(Path(plan.arguments[5]), runtime / "spicetools_patch_manager.json")
+            self.assertEqual(plan.arguments[6:], (
+                "-ea",
+                "-url", "example.com:8083",
+                "-card0", "E0040100ABCDEF12",
+            ))
 
     def test_omits_optional_paths_when_left_blank(self):
         with tempfile.TemporaryDirectory() as temporary:

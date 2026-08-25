@@ -10,6 +10,7 @@
 - 게임별 작업 폴더, 모듈 경로, 추가 인자를 manifest로 관리
 - 선택한 spice2x 설정 파일을 실행과 Configurator에 전달하며, 미지정 시 spice2x 기본값 사용
 - 선택한 `spicetools_patch_manager.json`을 `-patchcfgpath`로 전달하며, 미지정 시 spice2x 기본값 사용
+- 로컬 EA 에뮬레이션, 원격 서버 주소, 플레이어 1 카드를 전역 설정으로 관리
 - 게임 목록과 썸네일을 GUI에서 표시
 - 게임 폴더의 DLL을 탐색해 게임 계열과 x86/x64를 제안
 - 폴더명에서 게임명과 버전의 초기값을 추정하고 GUI에서 편집
@@ -33,7 +34,7 @@ python -m pip install -r requirements.txt
 
 GUI의 게임 등록 정보는 `data/games/*.json`에 상대경로로 저장됩니다.
 
-상단의 `설정` 팝업에서 현재 portable 루트, 데이터·게임 목록·런타임 설정·화면 설정·로그 저장 위치를 확인할 수 있습니다. 저장 위치는 표시만 하며 자동으로 이동하지 않습니다. 같은 팝업의 `Spice2x` 탭에서 공용 실행 파일, `spicetools.xml`, `spicetools_patch_manager.json` 경로를 지정합니다.
+상단의 `설정` 팝업에서 현재 portable 루트, 데이터·게임 목록·런타임 설정·화면 설정·로그 저장 위치를 확인할 수 있습니다. 저장 위치는 표시만 하며 자동으로 이동하지 않습니다. 같은 팝업의 `Spice2x` 탭에서 공용 실행 파일, `spicetools.xml`, `spicetools_patch_manager.json`, `-ea`, `-url`, `-card0`을 지정합니다. 창의 X 또는 `저장 후 닫기`는 변경값을 저장하고, `변경 취소`는 저장하지 않습니다.
 
 `게임 추가`에서 실행 방식을 선택합니다.
 

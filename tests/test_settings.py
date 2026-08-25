@@ -16,6 +16,9 @@ class RuntimeSettingsStoreTests(unittest.TestCase):
                 spice_configurator="runtime/spicecfg.exe",
                 spice_config_path="profiles/shared.xml",
                 spice_patch_manager_config_path="profiles/spicetools_patch_manager.json",
+                spice_local_ea=True,
+                spice_service_url="example.com:8083",
+                spice_card0="E0040100ABCDEF12",
             )
 
             store.save(expected)
@@ -28,6 +31,20 @@ class RuntimeSettingsStoreTests(unittest.TestCase):
             settings = RuntimeSettingsStore(PortablePaths(Path(temporary))).load()
 
             self.assertEqual(settings, RuntimeSettings())
+
+    def test_rejects_invalid_card_number(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = RuntimeSettingsStore(PortablePaths(Path(temporary)))
+
+            with self.assertRaisesRegex(ValueError, "16자리 16진수"):
+                store.save(RuntimeSettings(spice_card0="not-a-card"))
+
+    def test_normalizes_card_number(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = RuntimeSettingsStore(PortablePaths(Path(temporary)))
+            store.save(RuntimeSettings(spice_card0="e0040100abcdef12"))
+
+            self.assertEqual(store.load().spice_card0, "E0040100ABCDEF12")
 
     def test_reads_original_settings_schema(self):
         settings = RuntimeSettings.from_dict(
