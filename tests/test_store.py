@@ -8,6 +8,24 @@ from bsm.store import GameStore
 
 
 class GameStoreSupportItemTests(unittest.TestCase):
+    def test_game_profile_round_trip_preserves_admin_flag(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            (root / "games" / "admin-game").mkdir(parents=True)
+            store = GameStore(PortablePaths(root))
+            game = GameDefinition(
+                id="admin-game",
+                title="Admin Game",
+                version="",
+                game_type="other",
+                game_root="games/admin-game",
+                run_as_admin=True,
+            )
+
+            store.save(game)
+
+            self.assertTrue(store.load_all()[0].run_as_admin)
+
     def test_support_server_round_trip_keeps_relative_parent_path(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary) / "ArcadeGameManager"
@@ -27,6 +45,7 @@ class GameStoreSupportItemTests(unittest.TestCase):
                 launcher_type="direct",
                 executable="server.exe",
                 item_kind="server",
+                run_as_admin=True,
             )
 
             store.save(item)
@@ -35,6 +54,7 @@ class GameStoreSupportItemTests(unittest.TestCase):
             self.assertEqual(loaded.item_kind, "server")
             self.assertFalse(Path(loaded.game_root).is_absolute())
             self.assertEqual(paths.resolve(loaded.game_root), server_root.resolve())
+            self.assertTrue(loaded.run_as_admin)
 
     def test_support_item_must_use_direct_launcher(self):
         with tempfile.TemporaryDirectory() as temporary:

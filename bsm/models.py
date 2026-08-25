@@ -20,6 +20,7 @@ class GameDefinition:
     executable: str = ""
     working_directory: str = "."
     item_kind: str = "game"
+    run_as_admin: bool = False
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "GameDefinition":
@@ -38,12 +39,13 @@ class GameDefinition:
             executable=str(value.get("executable", "")),
             working_directory=str(value.get("workingDirectory", ".")),
             item_kind=str(value.get("itemKind", "game")),
+            run_as_admin=bool(value.get("runAsAdmin", False)),
         )
 
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
         return {
-            "schemaVersion": 3,
+            "schemaVersion": 4,
             "id": raw["id"],
             "title": raw["title"],
             "version": raw["version"],
@@ -58,6 +60,7 @@ class GameDefinition:
             "executable": raw["executable"],
             "workingDirectory": raw["working_directory"],
             "itemKind": raw["item_kind"],
+            "runAsAdmin": raw["run_as_admin"],
         }
 
 
@@ -78,6 +81,7 @@ class LaunchPlan:
     executable: str
     working_directory: str
     arguments: tuple[str, ...]
+    run_as_admin: bool = False
 
     @property
     def command(self) -> tuple[str, ...]:

@@ -2,9 +2,10 @@ import tempfile
 import os
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
-from bsm.launcher import DirectLauncher, GameLauncher, SpiceLauncher
-from bsm.models import GameDefinition
+from bsm.launcher import DirectLauncher, GameLauncher, SpiceLauncher, _launch_plan
+from bsm.models import GameDefinition, LaunchPlan
 from bsm.paths import PortablePaths
 from bsm.settings import RuntimeSettings
 
@@ -30,6 +31,7 @@ class SpiceLauncherTests(unittest.TestCase):
                 module_directory="modules",
                 architecture="x64",
                 arguments=["-w"],
+                run_as_admin=True,
             )
 
             plan = SpiceLauncher(
@@ -57,6 +59,7 @@ class SpiceLauncherTests(unittest.TestCase):
                 "-card0", "E0040100ABCDEF12",
                 "-w",
             ))
+            self.assertTrue(plan.run_as_admin)
 
     def test_configurator_uses_same_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -149,6 +152,7 @@ class ExtensibleLauncherTests(unittest.TestCase):
                 executable="dmt2-tool/DMT2 Tool.exe",
                 working_directory="dmt2-tool",
                 arguments=["--windowed"],
+                run_as_admin=True,
             )
 
             plan = DirectLauncher(PortablePaths(root)).plan(game)
@@ -156,6 +160,17 @@ class ExtensibleLauncherTests(unittest.TestCase):
             self.assertEqual(Path(plan.executable), executable)
             self.assertEqual(Path(plan.working_directory), executable.parent)
             self.assertEqual(plan.arguments, ("--windowed",))
+            self.assertTrue(plan.run_as_admin)
+
+    def test_admin_plan_uses_elevated_launcher(self):
+        plan = LaunchPlan("game.exe", ".", ("--windowed",), run_as_admin=True)
+        expected_process = object()
+
+        with patch("bsm.launcher._launch_elevated", return_value=expected_process) as launch_elevated:
+            actual_process = _launch_plan(plan)
+
+        self.assertIs(actual_process, expected_process)
+        launch_elevated.assert_called_once_with(plan)
 
     def test_launcher_registry_preserves_legacy_spice2x_default(self):
         game = GameDefinition.from_dict(
@@ -212,6 +227,28 @@ class ExtensibleLauncherTests(unittest.TestCase):
             self.assertEqual(plan.executable, os.environ.get("COMSPEC", "cmd.exe"))
             self.assertEqual(plan.arguments[:2], ("/d", "/c"))
             self.assertEqual(Path(plan.arguments[2]), script.resolve())
+
+    def test_batch_profile_preserves_admin_flag(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game_root = root / "games" / "batch"
+            game_root.mkdir(parents=True)
+            script = game_root / "launch.bat"
+            script.write_text("@echo off\n", encoding="utf-8")
+            game = GameDefinition(
+                id="batch",
+                title="Batch Game",
+                version="",
+                game_type="other",
+                game_root="games/batch",
+                launcher_type="direct",
+                executable="launch.bat",
+                run_as_admin=True,
+            )
+
+            plan = DirectLauncher(PortablePaths(root)).plan(game)
+
+            self.assertTrue(plan.run_as_admin)
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 3,
+  "schemaVersion": 4,
   "id": "asphyxia-core",
   "title": "Asphyxia Core",
   "version": "",
@@ -13,5 +13,6 @@
   "launcherType": "direct",
   "executable": "asphyxia-core-x64.exe",
   "workingDirectory": ".",
-  "itemKind": "server"
+  "itemKind": "server",
+  "runAsAdmin": false
 }

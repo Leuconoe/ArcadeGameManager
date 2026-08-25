@@ -10,7 +10,7 @@ from tkinter import filedialog, messagebox, ttk
 
 from .catalog import catalog_titles
 from .detector import GameDetector
-from .launcher import GameLauncher
+from .launcher import ElevatedProcess, GameLauncher
 from .models import DetectionCandidate, GameDefinition
 from .paths import PortablePaths
 from .store import GameStore
@@ -67,7 +67,7 @@ class ManagerApp(tk.Tk):
         self.grid_cards: dict[str, tk.Frame] = {}
         self.selected_game_key = ""
         self.active_library = "games"
-        self.running_processes: dict[str, subprocess.Popen] = {}
+        self.running_processes: dict[str, subprocess.Popen | ElevatedProcess] = {}
         ui_settings = self._load_ui_settings()
         self.view_mode = ui_settings["viewMode"]
         self.sort_mode = ui_settings["sortMode"]
@@ -767,6 +767,7 @@ class SupportItemDialog(tk.Toplevel):
         self.executable_var = tk.StringVar(value=item.executable if item else "")
         self.working_var = tk.StringVar(value=item.working_directory if item else ".")
         self.thumbnail_var = tk.StringVar(value=item.thumbnail if item else "")
+        self.run_as_admin_var = tk.BooleanVar(value=item.run_as_admin if item else False)
         self._build(item)
 
     def _build(self, item: GameDefinition | None) -> None:
@@ -804,7 +805,13 @@ class SupportItemDialog(tk.Toplevel):
         ttk.Entry(form, textvariable=self.thumbnail_var).grid(row=8, column=1, sticky=tk.EW, padx=8)
         ttk.Button(form, text="찾기", command=self._browse_thumbnail).grid(row=8, column=2)
 
-        ttk.Label(form, text="추가 인자\n(한 줄에 하나)").grid(row=9, column=0, sticky=tk.NW, pady=6)
+        ttk.Checkbutton(
+            form,
+            text="관리자 권한으로 실행 (Windows UAC)",
+            variable=self.run_as_admin_var,
+        ).grid(row=9, column=1, columnspan=2, sticky=tk.W, padx=8, pady=6)
+
+        ttk.Label(form, text="추가 인자\n(한 줄에 하나)").grid(row=10, column=0, sticky=tk.NW, pady=6)
         self.arguments_text = tk.Text(
             form,
             height=6,
@@ -819,13 +826,13 @@ class SupportItemDialog(tk.Toplevel):
             pady=8,
             font=("Cascadia Mono", 9),
         )
-        self.arguments_text.grid(row=9, column=1, columnspan=2, sticky=tk.NSEW, padx=8)
-        form.rowconfigure(9, weight=1)
+        self.arguments_text.grid(row=10, column=1, columnspan=2, sticky=tk.NSEW, padx=8)
+        form.rowconfigure(10, weight=1)
         if item:
             self.arguments_text.insert("1.0", "\n".join(item.arguments))
 
         buttons = ttk.Frame(form, style="App.TFrame")
-        buttons.grid(row=10, column=0, columnspan=3, sticky=tk.E, pady=(16, 0))
+        buttons.grid(row=11, column=0, columnspan=3, sticky=tk.E, pady=(16, 0))
         ttk.Button(buttons, text="취소", style="Ghost.TButton", command=self.destroy).pack(side=tk.RIGHT, padx=(7, 0))
         ttk.Button(buttons, text="저장", style="Primary.TButton", command=self._save).pack(side=tk.RIGHT)
 
@@ -916,6 +923,7 @@ class SupportItemDialog(tk.Toplevel):
                 executable=executable,
                 working_directory=self.working_var.get().strip() or ".",
                 item_kind=kind,
+                run_as_admin=self.run_as_admin_var.get(),
             )
         except (OSError, ValueError, KeyError) as error:
             messagebox.showerror("저장 실패", str(error), parent=self)
@@ -1198,6 +1206,7 @@ class GameDialog(tk.Toplevel):
         self.thumbnail_var = tk.StringVar(value=game.thumbnail if game else "")
         self.executable_var = tk.StringVar(value=game.executable if game else "")
         self.working_directory_var = tk.StringVar(value=game.working_directory if game else ".")
+        self.run_as_admin_var = tk.BooleanVar(value=game.run_as_admin if game else False)
 
         row = 1
         ttk.Label(form, text="실행 방식").grid(row=row, column=0, sticky=tk.W, pady=5)
@@ -1251,6 +1260,12 @@ class GameDialog(tk.Toplevel):
         ttk.Label(form, text="작업 폴더").grid(row=row, column=0, sticky=tk.W, pady=5)
         self.working_directory_entry = ttk.Entry(form, textvariable=self.working_directory_var)
         self.working_directory_entry.grid(row=row, column=1, columnspan=2, sticky=tk.EW, padx=8)
+        row += 1
+        ttk.Checkbutton(
+            form,
+            text="관리자 권한으로 실행 (Windows UAC)",
+            variable=self.run_as_admin_var,
+        ).grid(row=row, column=1, columnspan=2, sticky=tk.W, padx=8, pady=5)
         row += 1
         ttk.Label(form, text="썸네일").grid(row=row, column=0, sticky=tk.W, pady=5)
         ttk.Entry(form, textvariable=self.thumbnail_var).grid(row=row, column=1, sticky=tk.EW, padx=8)
@@ -1439,6 +1454,7 @@ class GameDialog(tk.Toplevel):
                 launcher_type=launcher_type,
                 executable=self.executable_var.get().strip(),
                 working_directory=self.working_directory_var.get().strip() or ".",
+                run_as_admin=self.run_as_admin_var.get(),
             )
         except (OSError, ValueError) as error:
             messagebox.showerror("저장 실패", str(error), parent=self)

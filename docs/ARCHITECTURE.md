@@ -184,7 +184,7 @@ IIDX_32_Pinky_Crush
 
 ```json
 {
-  "schemaVersion": 1,
+  "schemaVersion": 4,
   "id": "iidx-example",
   "title": "beatmania IIDX",
   "version": "32 Pinky Crush",
@@ -195,11 +195,14 @@ IIDX_32_Pinky_Crush
   "thumbnail": "data/thumbnails/iidx-example.webp",
   "configProfile": "shared",
   "arguments": ["-w"],
-  "detectedDll": "bm2dx.dll"
+  "detectedDll": "bm2dx.dll",
+  "runAsAdmin": false
 }
 ```
 
 `arguments`는 게임에 필요한 사용자 인자입니다. GUI에서는 한 줄에 인자 하나씩 입력합니다. `-modules`, `-cfgpath`, `-patchcfgpath`, `-ea`, `-url`, `-card0`은 전역 설정에 따라 실행 코어가 자동으로 추가합니다.
+
+`runAsAdmin`이 `true`인 프로필은 Windows `runas` verb로 실행해 UAC 승격을 요청합니다. 기본값은 `false`이며 Spice2x, 일반 EXE, BAT/CMD 실행에 동일하게 적용됩니다.
 
 환경 변수나 사전 실행 작업이 필요한 게임이 확인되면 다음과 같이 구조화된 필드로 확장합니다. 임의의 shell 문자열을 그대로 실행하는 방식은 경로 quoting과 보안 문제가 있어 피하는 것이 좋습니다.
 

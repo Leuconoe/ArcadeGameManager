@@ -1,13 +1,96 @@
 from __future__ import annotations
 
+import ctypes
 import os
-import subprocess
 import shutil
+import subprocess
 from pathlib import Path
+from ctypes import wintypes
 
 from .models import GameDefinition, LaunchPlan
 from .paths import PortablePaths
 from .settings import RuntimeSettings
+
+
+class ElevatedProcess:
+    """Minimal Popen-compatible wrapper around an elevated process handle."""
+
+    def __init__(self, handle):
+        self._handle = handle
+        self._kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._kernel32.GetProcessId.argtypes = [wintypes.HANDLE]
+        self._kernel32.GetProcessId.restype = wintypes.DWORD
+        self._kernel32.GetExitCodeProcess.argtypes = [wintypes.HANDLE, ctypes.POINTER(wintypes.DWORD)]
+        self._kernel32.GetExitCodeProcess.restype = wintypes.BOOL
+        self._kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self._kernel32.CloseHandle.restype = wintypes.BOOL
+        self.pid = int(self._kernel32.GetProcessId(handle))
+
+    def poll(self) -> int | None:
+        if not self._handle:
+            return 0
+        exit_code = wintypes.DWORD()
+        if not self._kernel32.GetExitCodeProcess(self._handle, ctypes.byref(exit_code)):
+            raise ctypes.WinError(ctypes.get_last_error())
+        return None if exit_code.value == 259 else int(exit_code.value)
+
+    def close(self) -> None:
+        if self._handle:
+            self._kernel32.CloseHandle(self._handle)
+            self._handle = None
+
+    def __del__(self):
+        self.close()
+
+
+class _ShellExecuteInfo(ctypes.Structure):
+    _fields_ = (
+        ("cbSize", wintypes.DWORD),
+        ("fMask", wintypes.ULONG),
+        ("hwnd", wintypes.HWND),
+        ("lpVerb", wintypes.LPCWSTR),
+        ("lpFile", wintypes.LPCWSTR),
+        ("lpParameters", wintypes.LPCWSTR),
+        ("lpDirectory", wintypes.LPCWSTR),
+        ("nShow", ctypes.c_int),
+        ("hInstApp", wintypes.HINSTANCE),
+        ("lpIDList", ctypes.c_void_p),
+        ("lpClass", wintypes.LPCWSTR),
+        ("hkeyClass", wintypes.HKEY),
+        ("dwHotKey", wintypes.DWORD),
+        ("hIconOrMonitor", wintypes.HANDLE),
+        ("hProcess", wintypes.HANDLE),
+    )
+
+
+def _launch_elevated(plan: LaunchPlan) -> ElevatedProcess:
+    if os.name != "nt":
+        raise OSError("관리자 권한 실행은 Windows에서만 지원합니다.")
+
+    shell32 = ctypes.WinDLL("shell32", use_last_error=True)
+    shell_execute = shell32.ShellExecuteExW
+    shell_execute.argtypes = [ctypes.POINTER(_ShellExecuteInfo)]
+    shell_execute.restype = wintypes.BOOL
+    info = _ShellExecuteInfo()
+    info.cbSize = ctypes.sizeof(info)
+    info.fMask = 0x00000040  # SEE_MASK_NOCLOSEPROCESS
+    info.lpVerb = "runas"
+    info.lpFile = plan.executable
+    info.lpParameters = subprocess.list2cmdline(plan.arguments) if plan.arguments else None
+    info.lpDirectory = plan.working_directory
+    info.nShow = 1  # SW_SHOWNORMAL
+    if not shell_execute(ctypes.byref(info)):
+        error = ctypes.get_last_error()
+        if error == 1223:
+            raise OSError("관리자 권한 실행이 사용자에 의해 취소되었습니다.")
+        raise ctypes.WinError(error)
+    return ElevatedProcess(info.hProcess)
+
+
+def _launch_plan(plan: LaunchPlan) -> subprocess.Popen | ElevatedProcess:
+    if plan.run_as_admin:
+        return _launch_elevated(plan)
+    return subprocess.Popen(list(plan.command), cwd=plan.working_directory, close_fds=True)
 
 
 class SpiceLauncher:
@@ -105,15 +188,11 @@ class SpiceLauncher:
             executable=str(executable),
             working_directory=str(game_root),
             arguments=tuple(arguments),
+            run_as_admin=game.run_as_admin,
         )
 
-    def launch(self, game: GameDefinition, *, configure: bool = False) -> subprocess.Popen:
-        plan = self.plan(game, configure=configure)
-        return subprocess.Popen(
-            list(plan.command),
-            cwd=plan.working_directory,
-            close_fds=True,
-        )
+    def launch(self, game: GameDefinition, *, configure: bool = False) -> subprocess.Popen | ElevatedProcess:
+        return _launch_plan(self.plan(game, configure=configure))
 
 
 class DirectLauncher:
@@ -148,12 +227,12 @@ class DirectLauncher:
                 executable=os.environ.get("COMSPEC", "cmd.exe"),
                 working_directory=str(working_directory),
                 arguments=("/d", "/c", str(executable), *game.arguments),
+                run_as_admin=game.run_as_admin,
             )
-        return LaunchPlan(str(executable), str(working_directory), tuple(game.arguments))
+        return LaunchPlan(str(executable), str(working_directory), tuple(game.arguments), game.run_as_admin)
 
-    def launch(self, game: GameDefinition, *, configure: bool = False) -> subprocess.Popen:
-        plan = self.plan(game, configure=configure)
-        return subprocess.Popen(list(plan.command), cwd=plan.working_directory, close_fds=True)
+    def launch(self, game: GameDefinition, *, configure: bool = False) -> subprocess.Popen | ElevatedProcess:
+        return _launch_plan(self.plan(game, configure=configure))
 
 
 class GameLauncher:
@@ -180,7 +259,7 @@ class GameLauncher:
     def plan(self, game: GameDefinition, *, configure: bool = False) -> LaunchPlan:
         return self._for(game).plan(game, configure=configure)
 
-    def launch(self, game: GameDefinition, *, configure: bool = False) -> subprocess.Popen:
+    def launch(self, game: GameDefinition, *, configure: bool = False) -> subprocess.Popen | ElevatedProcess:
         return self._for(game).launch(game, configure=configure)
 
     def validation_error(self, game: GameDefinition) -> str:
