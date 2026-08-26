@@ -87,6 +87,8 @@ portable 기준점(`portableRoot`)은 프로세스의 현재 작업 폴더가 �
 | `gameRoot` | `portableRoot` | `games/iidx-32/contents` |
 | `thumbnail` | `portableRoot` | `data/thumbnails/iidx-32.webp` |
 | `moduleDirectory` | 해당 `gameRoot` | `modules` 또는 `.` |
+| `preLaunchExecutable` | 해당 `gameRoot` | `helpers/prepare.bat` 또는 빈 값 |
+| `postExitExecutable` | 해당 `gameRoot` | `helpers/cleanup.exe` 또는 빈 값 |
 | 게임 인자 안의 상대 파일 | 해당 `gameRoot` | `prop/ea3-config.xml` |
 
 경로 구분자는 JSON에서 `/`로 통일하고, 실행할 때 Windows 경로로 정규화합니다. 드라이브 문자, UNC 경로, `file:` URI, `%APPDATA%` 같은 환경 변수는 manifest 저장 시 거부합니다.
@@ -184,7 +186,7 @@ IIDX_32_Pinky_Crush
 
 ```json
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "id": "iidx-example",
   "title": "beatmania IIDX",
   "version": "32 Pinky Crush",
@@ -196,7 +198,9 @@ IIDX_32_Pinky_Crush
   "configProfile": "shared",
   "arguments": ["-w"],
   "detectedDll": "bm2dx.dll",
-  "runAsAdmin": false
+  "runAsAdmin": false,
+  "preLaunchExecutable": "helpers/prepare.bat",
+  "postExitExecutable": "helpers/cleanup.exe"
 }
 ```
 
@@ -204,19 +208,15 @@ IIDX_32_Pinky_Crush
 
 `runAsAdmin`이 `true`인 프로필은 Windows `runas` verb로 실행해 UAC 승격을 요청합니다. 기본값은 `false`이며 Spice2x, 일반 EXE, BAT/CMD 실행에 동일하게 적용됩니다.
 
-환경 변수나 사전 실행 작업이 필요한 게임이 확인되면 다음과 같이 구조화된 필드로 확장합니다. 임의의 shell 문자열을 그대로 실행하는 방식은 경로 quoting과 보안 문제가 있어 피하는 것이 좋습니다.
+`preLaunchExecutable`과 `postExitExecutable`은 `gameRoot` 기준 상대경로입니다. 시작 전 앱은 메인 프로필 직전에 실행하고 완료를 기다리지 않습니다. 종료 후 앱은 메인 프로세스 핸들을 감시해 종료된 다음 실행합니다. 종료 감시 중 관리 창을 닫더라도 사후 앱 실행을 마칠 때까지 백그라운드 프로세스가 유지됩니다. 두 보조 앱의 작업 폴더는 각 실행 파일의 부모 폴더이며 Configurator 실행에는 적용하지 않습니다. BAT가 `start`로 실제 게임을 분리 실행하면 `cmd.exe`가 먼저 끝나 사후 앱도 일찍 실행되므로, 이 기능을 쓰는 BAT는 자식 게임 프로세스가 끝날 때까지 대기해야 합니다.
+
+환경 변수가 필요한 게임이 확인되면 다음처럼 구조화된 필드로 확장합니다. 임의의 shell 문자열을 그대로 실행하는 방식은 경로 quoting과 보안 문제가 있어 피하는 것이 좋습니다.
 
 ```json
 {
   "environment": {
     "EXAMPLE_DEVICE": "1"
-  },
-  "preLaunch": [
-    {
-      "file": "tools/helper.exe",
-      "arguments": ["--start"]
-    }
-  ]
+  }
 }
 ```
 

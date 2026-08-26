@@ -20,11 +20,31 @@ class GameStoreSupportItemTests(unittest.TestCase):
                 game_type="other",
                 game_root="games/admin-game",
                 run_as_admin=True,
+                pre_launch_executable="helpers/prepare.exe",
+                post_exit_executable="helpers/cleanup.bat",
             )
 
             store.save(game)
 
-            self.assertTrue(store.load_all()[0].run_as_admin)
+            loaded = store.load_all()[0]
+            self.assertTrue(loaded.run_as_admin)
+            self.assertEqual(loaded.pre_launch_executable, "helpers/prepare.exe")
+            self.assertEqual(loaded.post_exit_executable, "helpers/cleanup.bat")
+
+    def test_profile_helper_must_be_relative(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            store = GameStore(PortablePaths(Path(temporary)))
+            game = GameDefinition(
+                id="absolute-helper",
+                title="Absolute Helper",
+                version="",
+                game_type="other",
+                game_root="games/absolute-helper",
+                pre_launch_executable="C:/tools/prepare.exe",
+            )
+
+            with self.assertRaisesRegex(ValueError, "절대경로"):
+                store.save(game)
 
     def test_support_server_round_trip_keeps_relative_parent_path(self):
         with tempfile.TemporaryDirectory() as temporary:

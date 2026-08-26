@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "id": "asphyxia-core",
   "title": "Asphyxia Core",
   "version": "",
@@ -14,5 +14,7 @@
   "executable": "asphyxia-core-x64.exe",
   "workingDirectory": ".",
   "itemKind": "server",
-  "runAsAdmin": false
+  "runAsAdmin": false,
+  "preLaunchExecutable": "",
+  "postExitExecutable": ""
 }

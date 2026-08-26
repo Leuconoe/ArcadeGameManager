@@ -1,5 +1,5 @@
 {
-  "schemaVersion": 4,
+  "schemaVersion": 5,
   "id": "iidx-example",
   "title": "beatmania IIDX",
   "version": "32 Pinky Crush",
@@ -17,5 +17,7 @@
   "executable": "",
   "workingDirectory": ".",
   "itemKind": "game",
-  "runAsAdmin": false
+  "runAsAdmin": false,
+  "preLaunchExecutable": "",
+  "postExitExecutable": ""
 }

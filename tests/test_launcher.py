@@ -1,5 +1,6 @@
 import tempfile
 import os
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -11,6 +12,30 @@ from bsm.settings import RuntimeSettings
 
 
 class SpiceLauncherTests(unittest.TestCase):
+    def test_configurator_does_not_run_profile_helpers(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            runtime = root / "spice2x"
+            game_root = root / "games" / "sdvx"
+            runtime.mkdir(parents=True)
+            game_root.mkdir(parents=True)
+            (runtime / "spicecfg.exe").write_bytes(b"")
+            (game_root / "prepare.exe").write_bytes(b"")
+            (game_root / "cleanup.exe").write_bytes(b"")
+            game = GameDefinition(
+                "sdvx", "SDVX", "", "sdvx", "games/sdvx", "", "x64",
+                pre_launch_executable="prepare.exe",
+                post_exit_executable="cleanup.exe",
+            )
+            expected_process = object()
+
+            with patch("bsm.launcher._launch_plan", return_value=expected_process) as launch_plan:
+                process = GameLauncher(PortablePaths(root)).launch(game, configure=True)
+
+            self.assertIs(process, expected_process)
+            launch_plan.assert_called_once()
+            self.assertEqual(Path(launch_plan.call_args.args[0].executable), runtime / "spicecfg.exe")
+
     def test_builds_central_runtime_plan(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -136,6 +161,50 @@ class SpiceLauncherTests(unittest.TestCase):
 
 
 class ExtensibleLauncherTests(unittest.TestCase):
+    def test_runs_pre_app_then_post_app_after_profile_exits(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game_root = root / "games" / "lifecycle"
+            game_root.mkdir(parents=True)
+            for name in ("game.exe", "prepare.bat", "cleanup.exe"):
+                (game_root / name).write_bytes(b"")
+            game = GameDefinition(
+                id="lifecycle",
+                title="Lifecycle Game",
+                version="",
+                game_type="other",
+                game_root="games/lifecycle",
+                launcher_type="direct",
+                executable="game.exe",
+                pre_launch_executable="prepare.bat",
+                post_exit_executable="cleanup.exe",
+            )
+            completed = threading.Event()
+            launched_plans = []
+
+            class FinishedProcess:
+                def wait(self):
+                    return 0
+
+            def fake_launch(plan):
+                launched_plans.append(plan)
+                if len(launched_plans) == 2:
+                    return FinishedProcess()
+                if len(launched_plans) == 3:
+                    completed.set()
+                return object()
+
+            with patch("bsm.launcher._launch_plan", side_effect=fake_launch):
+                process = GameLauncher(PortablePaths(root)).launch(game)
+                self.assertTrue(completed.wait(1))
+
+            self.assertIsInstance(process, FinishedProcess)
+            self.assertEqual(launched_plans[0].executable, os.environ.get("COMSPEC", "cmd.exe"))
+            self.assertEqual(Path(launched_plans[0].arguments[2]), game_root / "prepare.bat")
+            self.assertEqual(Path(launched_plans[1].executable), game_root / "game.exe")
+            self.assertEqual(Path(launched_plans[2].executable), game_root / "cleanup.exe")
+            self.assertEqual(Path(launched_plans[2].working_directory), game_root)
+
     def test_direct_launcher_uses_paths_relative_to_game_root(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
@@ -202,6 +271,27 @@ class ExtensibleLauncherTests(unittest.TestCase):
             error = GameLauncher(PortablePaths(root)).validation_error(game)
 
             self.assertIn("게임 실행 파일", error)
+
+    def test_validation_reports_missing_profile_helper(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            game_root = root / "games" / "missing-helper"
+            game_root.mkdir(parents=True)
+            (game_root / "game.exe").write_bytes(b"")
+            game = GameDefinition(
+                id="missing-helper",
+                title="Missing Helper",
+                version="",
+                game_type="other",
+                game_root="games/missing-helper",
+                launcher_type="direct",
+                executable="game.exe",
+                pre_launch_executable="missing.exe",
+            )
+
+            error = GameLauncher(PortablePaths(root)).validation_error(game)
+
+            self.assertIn("프로필 보조 앱", error)
 
     def test_batch_support_tool_is_wrapped_with_cmd(self):
         with tempfile.TemporaryDirectory() as temporary:

@@ -73,6 +73,9 @@ class GameStore:
             if not game.executable.strip():
                 raise ValueError("일반 실행 파일을 선택하세요.")
             self.paths.ensure_relative(game.executable)
+        for auxiliary in (game.pre_launch_executable, game.post_exit_executable):
+            if auxiliary:
+                self.paths.ensure_relative(auxiliary)
         if game.thumbnail:
             self.paths.ensure_relative(game.thumbnail)
         if game.architecture not in {"x86", "x64"}:

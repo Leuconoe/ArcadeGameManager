@@ -733,6 +733,133 @@ class ManagerApp(tk.Tk):
         except (OSError, ValueError) as error:
             messagebox.showerror("실행 실패", str(error), parent=self)
 
+class AdvancedLaunchOptions:
+    def __init__(
+        self,
+        parent: ttk.Frame,
+        paths: PortablePaths,
+        folder_provider,
+        item: GameDefinition | None,
+        *,
+        dialog_width: int,
+        collapsed_height: int,
+        expanded_height: int,
+    ):
+        self.paths = paths
+        self.folder_provider = folder_provider
+        self.window = parent.winfo_toplevel()
+        self.dialog_width = dialog_width
+        self.collapsed_height = collapsed_height
+        self.expanded_height = expanded_height
+        self.expanded = False
+        self.run_as_admin_var = tk.BooleanVar(value=item.run_as_admin if item else False)
+        self.pre_launch_var = tk.StringVar(value=item.pre_launch_executable if item else "")
+        self.post_exit_var = tk.StringVar(value=item.post_exit_executable if item else "")
+
+        self.toggle_button = ttk.Button(
+            parent,
+            text=self._toggle_text(item),
+            style="Ghost.TButton",
+            command=self.toggle,
+        )
+        self.panel = ttk.Frame(parent, style="App.TFrame", padding=(12, 8))
+        self.panel.columnconfigure(1, weight=1)
+        ttk.Label(
+            self.panel,
+            text="필요할 때만 펼쳐 사용하는 프로필별 실행 옵션입니다.",
+            style="Muted.TLabel",
+        ).grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 6))
+        ttk.Checkbutton(
+            self.panel,
+            text="관리자 권한으로 실행 (Windows UAC)",
+            variable=self.run_as_admin_var,
+        ).grid(row=1, column=0, columnspan=3, sticky=tk.W, pady=4)
+        self._add_app_row(2, "시작 전 앱", self.pre_launch_var)
+        self._add_app_row(3, "종료 후 앱", self.post_exit_var)
+        ttk.Label(self.panel, text="추가 인자\n(한 줄에 하나)").grid(row=4, column=0, sticky=tk.NW, pady=5)
+        self.arguments_text = tk.Text(
+            self.panel,
+            height=5,
+            wrap=tk.NONE,
+            background=COLORS["surface_alt"],
+            foreground=COLORS["text"],
+            insertbackground=COLORS["text"],
+            selectbackground=COLORS["accent"],
+            relief=tk.FLAT,
+            borderwidth=0,
+            padx=8,
+            pady=8,
+            font=("Cascadia Mono", 9),
+        )
+        self.arguments_text.grid(row=4, column=1, columnspan=2, sticky=tk.EW, padx=8, pady=5)
+        if item:
+            self.arguments_text.insert("1.0", "\n".join(item.arguments))
+
+    def _add_app_row(self, row: int, label: str, variable: tk.StringVar) -> None:
+        ttk.Label(self.panel, text=label).grid(row=row, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(self.panel, textvariable=variable).grid(row=row, column=1, sticky=tk.EW, padx=8)
+        ttk.Button(
+            self.panel,
+            text="찾기",
+            command=lambda target=variable, title=label: self._browse_app(target, title),
+        ).grid(row=row, column=2)
+
+    @staticmethod
+    def _toggle_text(item: GameDefinition | None, *, expanded: bool = False) -> str:
+        configured = bool(
+            item
+            and (
+                item.run_as_admin
+                or item.arguments
+                or item.pre_launch_executable
+                or item.post_exit_executable
+            )
+        )
+        suffix = " · 설정됨" if configured else ""
+        return f"{'▼' if expanded else '▶'} 고급 실행 옵션{suffix}"
+
+    def grid(self, *, row: int) -> None:
+        self.toggle_button.grid(row=row, column=0, columnspan=3, sticky=tk.W, pady=(8, 2))
+        self.panel.grid(row=row + 1, column=0, columnspan=3, sticky=tk.EW)
+        self.panel.grid_remove()
+
+    def toggle(self) -> None:
+        self.expanded = not self.expanded
+        if self.expanded:
+            self.panel.grid()
+        else:
+            self.panel.grid_remove()
+        configured = bool(
+            self.run_as_admin_var.get()
+            or self.pre_launch_var.get().strip()
+            or self.post_exit_var.get().strip()
+            or self.arguments()
+        )
+        suffix = " · 설정됨" if configured else ""
+        self.toggle_button.configure(text=f"{'▼' if self.expanded else '▶'} 고급 실행 옵션{suffix}")
+        height = self.expanded_height if self.expanded else self.collapsed_height
+        height = min(height, self.window.winfo_screenheight() - 80)
+        self.window.geometry(f"{self.dialog_width}x{height}")
+
+    def _browse_app(self, variable: tk.StringVar, label: str) -> None:
+        try:
+            folder = self.folder_provider()
+        except (OSError, ValueError) as error:
+            messagebox.showerror(f"{label} 선택", str(error), parent=self.window)
+            return
+        selected = filedialog.askopenfilename(
+            parent=self.window,
+            title=f"{label} 선택",
+            initialdir=str(folder),
+            filetypes=[("Executable", "*.exe *.bat *.cmd"), ("All files", "*.*")],
+        )
+        if selected:
+            variable.set(self.paths.relative(Path(selected), base=folder))
+
+    def arguments(self) -> list[str]:
+        return [line.strip() for line in self.arguments_text.get("1.0", tk.END).splitlines() if line.strip()]
+
+
 class SupportItemDialog(tk.Toplevel):
     TYPE_LABELS = {"가상 서버": "server", "보조 도구": "tool"}
 
@@ -767,7 +894,6 @@ class SupportItemDialog(tk.Toplevel):
         self.executable_var = tk.StringVar(value=item.executable if item else "")
         self.working_var = tk.StringVar(value=item.working_directory if item else ".")
         self.thumbnail_var = tk.StringVar(value=item.thumbnail if item else "")
-        self.run_as_admin_var = tk.BooleanVar(value=item.run_as_admin if item else False)
         self._build(item)
 
     def _build(self, item: GameDefinition | None) -> None:
@@ -805,31 +931,16 @@ class SupportItemDialog(tk.Toplevel):
         ttk.Entry(form, textvariable=self.thumbnail_var).grid(row=8, column=1, sticky=tk.EW, padx=8)
         ttk.Button(form, text="찾기", command=self._browse_thumbnail).grid(row=8, column=2)
 
-        ttk.Checkbutton(
+        self.advanced_options = AdvancedLaunchOptions(
             form,
-            text="관리자 권한으로 실행 (Windows UAC)",
-            variable=self.run_as_admin_var,
-        ).grid(row=9, column=1, columnspan=2, sticky=tk.W, padx=8, pady=6)
-
-        ttk.Label(form, text="추가 인자\n(한 줄에 하나)").grid(row=10, column=0, sticky=tk.NW, pady=6)
-        self.arguments_text = tk.Text(
-            form,
-            height=6,
-            wrap=tk.NONE,
-            background=COLORS["surface_alt"],
-            foreground=COLORS["text"],
-            insertbackground=COLORS["text"],
-            selectbackground=COLORS["accent"],
-            relief=tk.FLAT,
-            borderwidth=0,
-            padx=8,
-            pady=8,
-            font=("Cascadia Mono", 9),
+            self.paths,
+            self._folder_path,
+            item,
+            dialog_width=760,
+            collapsed_height=630,
+            expanded_height=780,
         )
-        self.arguments_text.grid(row=10, column=1, columnspan=2, sticky=tk.NSEW, padx=8)
-        form.rowconfigure(10, weight=1)
-        if item:
-            self.arguments_text.insert("1.0", "\n".join(item.arguments))
+        self.advanced_options.grid(row=9)
 
         buttons = ttk.Frame(form, style="App.TFrame")
         buttons.grid(row=11, column=0, columnspan=3, sticky=tk.E, pady=(16, 0))
@@ -908,7 +1019,7 @@ class SupportItemDialog(tk.Toplevel):
             version = self.version_var.get().strip()
             item_id = self.original.id if self.original else self.store.make_unique_id(title, version)
             kind = self.TYPE_LABELS[self.kind_var.get()]
-            arguments = [line.strip() for line in self.arguments_text.get("1.0", tk.END).splitlines() if line.strip()]
+            arguments = self.advanced_options.arguments()
             item = GameDefinition(
                 id=item_id,
                 title=title,
@@ -923,7 +1034,9 @@ class SupportItemDialog(tk.Toplevel):
                 executable=executable,
                 working_directory=self.working_var.get().strip() or ".",
                 item_kind=kind,
-                run_as_admin=self.run_as_admin_var.get(),
+                run_as_admin=self.advanced_options.run_as_admin_var.get(),
+                pre_launch_executable=self.advanced_options.pre_launch_var.get().strip(),
+                post_exit_executable=self.advanced_options.post_exit_var.get().strip(),
             )
         except (OSError, ValueError, KeyError) as error:
             messagebox.showerror("저장 실패", str(error), parent=self)
@@ -1206,7 +1319,6 @@ class GameDialog(tk.Toplevel):
         self.thumbnail_var = tk.StringVar(value=game.thumbnail if game else "")
         self.executable_var = tk.StringVar(value=game.executable if game else "")
         self.working_directory_var = tk.StringVar(value=game.working_directory if game else ".")
-        self.run_as_admin_var = tk.BooleanVar(value=game.run_as_admin if game else False)
 
         row = 1
         ttk.Label(form, text="실행 방식").grid(row=row, column=0, sticky=tk.W, pady=5)
@@ -1261,36 +1373,21 @@ class GameDialog(tk.Toplevel):
         self.working_directory_entry = ttk.Entry(form, textvariable=self.working_directory_var)
         self.working_directory_entry.grid(row=row, column=1, columnspan=2, sticky=tk.EW, padx=8)
         row += 1
-        ttk.Checkbutton(
-            form,
-            text="관리자 권한으로 실행 (Windows UAC)",
-            variable=self.run_as_admin_var,
-        ).grid(row=row, column=1, columnspan=2, sticky=tk.W, padx=8, pady=5)
-        row += 1
         ttk.Label(form, text="썸네일").grid(row=row, column=0, sticky=tk.W, pady=5)
         ttk.Entry(form, textvariable=self.thumbnail_var).grid(row=row, column=1, sticky=tk.EW, padx=8)
         ttk.Button(form, text="찾기", command=self.browse_thumbnail).grid(row=row, column=2)
         row += 1
-        ttk.Label(form, text="추가 인자\n(한 줄에 하나)").grid(row=row, column=0, sticky=tk.NW, pady=5)
-        self.arguments_text = tk.Text(
+        self.advanced_options = AdvancedLaunchOptions(
             form,
-            height=7,
-            wrap=tk.NONE,
-            background=COLORS["surface_alt"],
-            foreground=COLORS["text"],
-            insertbackground=COLORS["text"],
-            selectbackground=COLORS["accent"],
-            relief=tk.FLAT,
-            borderwidth=0,
-            padx=8,
-            pady=8,
-            font=("Cascadia Mono", 9),
+            self.paths,
+            self._folder_path,
+            game,
+            dialog_width=780,
+            collapsed_height=730,
+            expanded_height=890,
         )
-        self.arguments_text.grid(row=row, column=1, columnspan=2, sticky=tk.NSEW, padx=8)
-        form.rowconfigure(row, weight=1)
-        if game:
-            self.arguments_text.insert("1.0", "\n".join(game.arguments))
-        row += 1
+        self.advanced_options.grid(row=row)
+        row += 2
         self.info_var = tk.StringVar(value="게임 폴더를 선택하고 DLL 탐색을 누르세요.")
         ttk.Label(form, textvariable=self.info_var, foreground="#555", wraplength=650).grid(
             row=row, column=0, columnspan=3, sticky=tk.W, pady=(10, 5)
@@ -1439,7 +1536,7 @@ class GameDialog(tk.Toplevel):
             version = self.version_var.get().strip()
             current_id = self.original.id if self.original else ""
             game_id = current_id or self.store.make_unique_id(title, version)
-            arguments = [line.strip() for line in self.arguments_text.get("1.0", tk.END).splitlines() if line.strip()]
+            arguments = self.advanced_options.arguments()
             game = GameDefinition(
                 id=game_id,
                 title=title,
@@ -1454,7 +1551,9 @@ class GameDialog(tk.Toplevel):
                 launcher_type=launcher_type,
                 executable=self.executable_var.get().strip(),
                 working_directory=self.working_directory_var.get().strip() or ".",
-                run_as_admin=self.run_as_admin_var.get(),
+                run_as_admin=self.advanced_options.run_as_admin_var.get(),
+                pre_launch_executable=self.advanced_options.pre_launch_var.get().strip(),
+                post_exit_executable=self.advanced_options.post_exit_var.get().strip(),
             )
         except (OSError, ValueError) as error:
             messagebox.showerror("저장 실패", str(error), parent=self)

@@ -21,6 +21,8 @@ class GameDefinition:
     working_directory: str = "."
     item_kind: str = "game"
     run_as_admin: bool = False
+    pre_launch_executable: str = ""
+    post_exit_executable: str = ""
 
     @classmethod
     def from_dict(cls, value: dict[str, Any]) -> "GameDefinition":
@@ -40,12 +42,14 @@ class GameDefinition:
             working_directory=str(value.get("workingDirectory", ".")),
             item_kind=str(value.get("itemKind", "game")),
             run_as_admin=bool(value.get("runAsAdmin", False)),
+            pre_launch_executable=str(value.get("preLaunchExecutable", "")),
+            post_exit_executable=str(value.get("postExitExecutable", "")),
         )
 
     def to_dict(self) -> dict[str, Any]:
         raw = asdict(self)
         return {
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "id": raw["id"],
             "title": raw["title"],
             "version": raw["version"],
@@ -61,6 +65,8 @@ class GameDefinition:
             "workingDirectory": raw["working_directory"],
             "itemKind": raw["item_kind"],
             "runAsAdmin": raw["run_as_admin"],
+            "preLaunchExecutable": raw["pre_launch_executable"],
+            "postExitExecutable": raw["post_exit_executable"],
         }
 
 

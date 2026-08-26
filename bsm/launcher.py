@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import ctypes
+import logging
 import os
 import shutil
 import subprocess
+import threading
 from pathlib import Path
 from ctypes import wintypes
 
@@ -24,6 +26,8 @@ class ElevatedProcess:
         self._kernel32.GetExitCodeProcess.restype = wintypes.BOOL
         self._kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
         self._kernel32.CloseHandle.restype = wintypes.BOOL
+        self._kernel32.WaitForSingleObject.argtypes = [wintypes.HANDLE, wintypes.DWORD]
+        self._kernel32.WaitForSingleObject.restype = wintypes.DWORD
         self.pid = int(self._kernel32.GetProcessId(handle))
 
     def poll(self) -> int | None:
@@ -33,6 +37,14 @@ class ElevatedProcess:
         if not self._kernel32.GetExitCodeProcess(self._handle, ctypes.byref(exit_code)):
             raise ctypes.WinError(ctypes.get_last_error())
         return None if exit_code.value == 259 else int(exit_code.value)
+
+    def wait(self) -> int:
+        if not self._handle:
+            return 0
+        result = self._kernel32.WaitForSingleObject(self._handle, 0xFFFFFFFF)
+        if result == 0xFFFFFFFF:
+            raise ctypes.WinError(ctypes.get_last_error())
+        return self.poll() or 0
 
     def close(self) -> None:
         if self._handle:
@@ -91,6 +103,31 @@ def _launch_plan(plan: LaunchPlan) -> subprocess.Popen | ElevatedProcess:
     if plan.run_as_admin:
         return _launch_elevated(plan)
     return subprocess.Popen(list(plan.command), cwd=plan.working_directory, close_fds=True)
+
+
+def _auxiliary_plan(paths: PortablePaths, game: GameDefinition, configured: str) -> LaunchPlan | None:
+    if not configured.strip():
+        return None
+    game_root = paths.resolve(game.game_root)
+    executable = paths.resolve(configured.strip(), base=game_root)
+    if not executable.is_file():
+        raise FileNotFoundError(f"프로필 보조 앱을 찾을 수 없습니다: {executable}")
+    working_directory = executable.parent
+    if executable.suffix.lower() in {".bat", ".cmd"}:
+        return LaunchPlan(
+            executable=os.environ.get("COMSPEC", "cmd.exe"),
+            working_directory=str(working_directory),
+            arguments=("/d", "/c", str(executable)),
+        )
+    return LaunchPlan(str(executable), str(working_directory), ())
+
+
+def _launch_after_exit(process: subprocess.Popen | ElevatedProcess, plan: LaunchPlan, profile_title: str) -> None:
+    try:
+        process.wait()
+        _launch_plan(plan)
+    except OSError:
+        logging.getLogger(__name__).exception("Could not run post-exit app for %s", profile_title)
 
 
 class SpiceLauncher:
@@ -239,6 +276,7 @@ class GameLauncher:
     """Dispatch games to a runtime adapter without coupling the GUI to one runtime."""
 
     def __init__(self, paths: PortablePaths, settings: RuntimeSettings | None = None):
+        self.paths = paths
         self.launchers = {
             "spice2x": SpiceLauncher(paths, settings),
             "direct": DirectLauncher(paths),
@@ -260,11 +298,29 @@ class GameLauncher:
         return self._for(game).plan(game, configure=configure)
 
     def launch(self, game: GameDefinition, *, configure: bool = False) -> subprocess.Popen | ElevatedProcess:
-        return self._for(game).launch(game, configure=configure)
+        main_plan = self.plan(game, configure=configure)
+        if configure:
+            return _launch_plan(main_plan)
+
+        pre_launch_plan = _auxiliary_plan(self.paths, game, game.pre_launch_executable)
+        post_exit_plan = _auxiliary_plan(self.paths, game, game.post_exit_executable)
+        if pre_launch_plan is not None:
+            _launch_plan(pre_launch_plan)
+        process = _launch_plan(main_plan)
+        if post_exit_plan is not None:
+            threading.Thread(
+                target=_launch_after_exit,
+                args=(process, post_exit_plan, game.title),
+                name=f"post-exit-{game.id}",
+                daemon=False,
+            ).start()
+        return process
 
     def validation_error(self, game: GameDefinition) -> str:
         try:
             self.plan(game)
+            _auxiliary_plan(self.paths, game, game.pre_launch_executable)
+            _auxiliary_plan(self.paths, game, game.post_exit_executable)
             return ""
         except (OSError, ValueError) as error:
             return str(error)
