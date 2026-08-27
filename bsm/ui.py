@@ -497,6 +497,7 @@ class ManagerApp(tk.Tk):
         self.status_var.set(f"{label} {len(visible_ids)}개 · {summary} · Portable root: {self.paths.root}")
 
     def _select_game(self, game_id: str, *, sync_tree: bool = True) -> None:
+        previous_game_key = self.selected_game_key
         self.selected_game_key = game_id if game_id in self.games else ""
         if sync_tree:
             current = self.tree.selection()
@@ -505,12 +506,20 @@ class ManagerApp(tk.Tk):
                 self.tree.see(self.selected_game_key)
             elif not self.selected_game_key and current:
                 self.tree.selection_remove(*current)
-        for card_id, card in self.grid_cards.items():
+
+        # Changing highlightthickness changes the card's requested size.  On the
+        # first click that can move/repaint the widget before Tk receives the
+        # second click, so a double-click is easily lost.  Keep the geometry
+        # stable and repaint only the cards whose selection state changed.
+        changed_card_ids = {previous_game_key, self.selected_game_key}
+        for card_id in changed_card_ids:
+            card = self.grid_cards.get(card_id)
+            if card is None:
+                continue
             selected = card_id == self.selected_game_key
             card.configure(
                 highlightbackground=COLORS["accent"] if selected else COLORS["border"],
                 highlightcolor=COLORS["accent"] if selected else COLORS["border"],
-                highlightthickness=2 if selected else 1,
             )
 
     def _on_thumbnail_resize(self, event) -> None:
