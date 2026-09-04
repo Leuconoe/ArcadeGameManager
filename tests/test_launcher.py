@@ -5,6 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+from bsm.arguments import normalize_arguments, split_argument_line
 from bsm.launcher import DirectLauncher, GameLauncher, SpiceLauncher, _launch_plan
 from bsm.models import GameDefinition, LaunchPlan
 from bsm.paths import PortablePaths
@@ -55,7 +56,7 @@ class SpiceLauncherTests(unittest.TestCase):
                 game_root="games/iidx/contents",
                 module_directory="modules",
                 architecture="x64",
-                arguments=["-w"],
+                arguments=["-w", "-graphics-force-refresh 120"],
                 run_as_admin=True,
             )
 
@@ -83,6 +84,7 @@ class SpiceLauncherTests(unittest.TestCase):
                 "-url", "example.com:8083",
                 "-card0", "E0040100ABCDEF12",
                 "-w",
+                "-graphics-force-refresh", "120",
             ))
             self.assertTrue(plan.run_as_admin)
 
@@ -160,6 +162,29 @@ class SpiceLauncherTests(unittest.TestCase):
             self.assertEqual(Path(plan.arguments[1]), config)
 
 
+class ArgumentTokenTests(unittest.TestCase):
+    def test_option_and_value_on_one_line_becomes_two_tokens(self):
+        self.assertEqual(normalize_arguments(["-url example.com:8083"]), ("-url", "example.com:8083"))
+
+    def test_quoted_value_keeps_spaces_and_drops_quotes(self):
+        self.assertEqual(
+            normalize_arguments(['-modules "C:/my games/modules"']),
+            ("-modules", "C:/my games/modules"),
+        )
+
+    def test_single_flag_per_line_is_unchanged(self):
+        self.assertEqual(normalize_arguments(["-w", "-iidxtdj"]), ("-w", "-iidxtdj"))
+
+    def test_bare_value_with_spaces_stays_one_argument(self):
+        self.assertEqual(normalize_arguments(["C:/my games/save.txt"]), ("C:/my games/save.txt",))
+
+    def test_blank_lines_are_dropped(self):
+        self.assertEqual(normalize_arguments(["", "   ", "-w"]), ("-w",))
+
+    def test_split_handles_tabs_and_repeated_spaces(self):
+        self.assertEqual(split_argument_line("-card0	  E0040100FFFFFFFF"), ["-card0", "E0040100FFFFFFFF"])
+
+
 class ExtensibleLauncherTests(unittest.TestCase):
     def test_runs_pre_app_then_post_app_after_profile_exits(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -220,7 +245,7 @@ class ExtensibleLauncherTests(unittest.TestCase):
                 launcher_type="direct",
                 executable="dmt2-tool/DMT2 Tool.exe",
                 working_directory="dmt2-tool",
-                arguments=["--windowed"],
+                arguments=["--windowed", "--lang ko"],
                 run_as_admin=True,
             )
 
@@ -228,7 +253,7 @@ class ExtensibleLauncherTests(unittest.TestCase):
 
             self.assertEqual(Path(plan.executable), executable)
             self.assertEqual(Path(plan.working_directory), executable.parent)
-            self.assertEqual(plan.arguments, ("--windowed",))
+            self.assertEqual(plan.arguments, ("--windowed", "--lang", "ko"))
             self.assertTrue(plan.run_as_admin)
 
     def test_admin_plan_uses_elevated_launcher(self):

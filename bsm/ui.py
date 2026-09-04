@@ -786,6 +786,12 @@ class AdvancedLaunchOptions:
         self._add_app_row(2, "시작 전 앱", self.pre_launch_var)
         self._add_app_row(3, "종료 후 앱", self.post_exit_var)
         ttk.Label(self.panel, text="추가 인자\n(한 줄에 하나)").grid(row=4, column=0, sticky=tk.NW, pady=5)
+        self.arguments_hint = ttk.Label(
+            self.panel,
+            text='옵션과 값을 한 줄에 함께 적어도 됩니다. 공백이 들어간 값은 "큰따옴표"로 묶으세요.',
+            style="Muted.TLabel",
+            wraplength=520,
+        )
         self.arguments_text = tk.Text(
             self.panel,
             height=5,
@@ -801,6 +807,7 @@ class AdvancedLaunchOptions:
             font=("Cascadia Mono", 9),
         )
         self.arguments_text.grid(row=4, column=1, columnspan=2, sticky=tk.EW, padx=8, pady=5)
+        self.arguments_hint.grid(row=5, column=1, columnspan=2, sticky=tk.W, padx=8, pady=(0, 4))
         if item:
             self.arguments_text.insert("1.0", "\n".join(item.arguments))
 

@@ -9,6 +9,7 @@ import threading
 from pathlib import Path
 from ctypes import wintypes
 
+from .arguments import normalize_arguments
 from .models import GameDefinition, LaunchPlan
 from .paths import PortablePaths
 from .settings import RuntimeSettings
@@ -219,7 +220,7 @@ class SpiceLauncher:
         if self.settings.spice_card0.strip():
             arguments.extend(("-card0", self.settings.spice_card0.strip()))
         if not configure:
-            arguments.extend(game.arguments)
+            arguments.extend(normalize_arguments(game.arguments))
 
         return LaunchPlan(
             executable=str(executable),
@@ -259,14 +260,15 @@ class DirectLauncher:
         if not working_directory.is_dir():
             raise ValueError(f"작업 폴더가 아닙니다: {working_directory}")
 
+        arguments = normalize_arguments(game.arguments)
         if executable.suffix.lower() in {".bat", ".cmd"}:
             return LaunchPlan(
                 executable=os.environ.get("COMSPEC", "cmd.exe"),
                 working_directory=str(working_directory),
-                arguments=("/d", "/c", str(executable), *game.arguments),
+                arguments=("/d", "/c", str(executable), *arguments),
                 run_as_admin=game.run_as_admin,
             )
-        return LaunchPlan(str(executable), str(working_directory), tuple(game.arguments), game.run_as_admin)
+        return LaunchPlan(str(executable), str(working_directory), arguments, game.run_as_admin)
 
     def launch(self, game: GameDefinition, *, configure: bool = False) -> subprocess.Popen | ElevatedProcess:
         return _launch_plan(self.plan(game, configure=configure))

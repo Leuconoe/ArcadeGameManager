@@ -204,7 +204,7 @@ IIDX_32_Pinky_Crush
 }
 ```
 
-`arguments`는 게임에 필요한 사용자 인자입니다. GUI에서는 한 줄에 인자 하나씩 입력합니다. `-modules`, `-cfgpath`, `-patchcfgpath`, `-ea`, `-url`, `-card0`은 전역 설정에 따라 실행 코어가 자동으로 추가합니다.
+`arguments`는 게임에 필요한 사용자 인자입니다. GUI에서는 한 줄에 옵션 하나씩 입력하며, 옵션과 값을 한 줄에 함께 적어도 됩니다. 실행 직전에 각 줄을 Windows 명령줄 규칙으로 토큰화해 `-url example.com:8083`을 두 개의 argv 항목으로 전달합니다. spice2x 옵션 파서는 앞의 `-`를 뗀 뒤 이름 전체를 비교하므로 옵션과 값이 한 argv 항목에 묶여 있으면 경고 없이 무시됩니다. 공백이 들어간 값은 큰따옴표로 묶습니다. `-modules`, `-cfgpath`, `-patchcfgpath`, `-ea`, `-url`, `-card0`은 전역 설정에 따라 실행 코어가 자동으로 추가합니다.
 
 `runAsAdmin`이 `true`인 프로필은 Windows `runas` verb로 실행해 UAC 승격을 요청합니다. 기본값은 `false`이며 Spice2x, 일반 EXE, BAT/CMD 실행에 동일하게 적용됩니다.
 
